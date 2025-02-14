@@ -1,0 +1,276 @@
+---
+title: "Assignment 1"
+course: "Advanded Cognitive Modeling"
+output: html_document
+date: "2025-02-11"
+authors: ""
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Setup
+```{r}
+pacman::p_load(tidyverse, tidyr, dplyr, ggplot2)
+```
+
+# Strategy functions 
+
+Implemented strategies are formalised in the .R script 'functions.R'. 
+Strategy 1 is an asymmetric and probabilistic version of the 'win-stay lose-shift' strategy, with noise. 
+Strategy 2 is a memory model with a moving average, taking previous 7 trials into account (this also includes noise).
+Additionally, a deterministic 'win-stay lose-shift' strategy (strategy 3) is formalised and used as the hider in both run 1 (against strategy 1) and run 2 (against strategy 2). 
+The choices in the first trial for all runs and strategies are determined using a random strategy. 
+```{r}
+source("functions.R")
+```
+
+# Running the Matching Pennies Game 
+Two runs are setup with some shared parameters (and other run specific). 
+Each run have 100 agents (or pairs of agents) and each pair 'play' for a 120 trials. The noise parameter for all models are set to the same, 0.1. 
+## Parameters 
+```{r}
+noise <- 0.1
+n_trials <- 120
+n_agents <- 100
+```
+
+## Run number 1: Strategy 1 versus Strategy 3
+
+### Simulation
+```{r}
+WS_weight <- 0.9 #probability of staying when winning str1
+LS_weight <- 0.6 #probability of shifting when losing str1
+
+run1 <- array(NA, c(n_trials, n_agents))
+
+for (a in 1:n_agents){
+  
+  guesser_asym_wsls <- rep(NA, n_trials)
+  hider_wsls <-  rep(NA, n_trials)
+
+  #first trial is based on nothing, i.e. random guess/hide
+  guesser_asym_wsls[1] <- random_agent(0.5) 
+  hider_wsls[1] <- random_agent(0.5) 
+
+  for (i in 2:n_trials){
+    if(guesser_asym_wsls[i-1] == hider_wsls[i-1]){
+      feedback <- 1
+    }
+    else{
+      feedback <- 0
+    }
+    guesser_asym_wsls[i] <- WSLS_asym_noise(guesser_asym_wsls[i-1], feedback, 
+                                            WS_weight, LS_weight, noise)
+    hider_wsls[i] <- WSLS_noise(hider_wsls[i-1], 1-feedback, noise)
+  }
+  
+  run1[,a] <- as.numeric(guesser_asym_wsls == hider_wsls)
+}
+```
+
+### Data frames
+Wrangling the data from the simulation (feedback) for plotting
+```{r}
+#using only the last simulation as an example: 
+df1_1 <- tibble(guesser_asym_wsls, hider_wsls, trial = seq(n_trials), 
+             feedback = as.numeric(guesser_asym_wsls == hider_wsls))
+df1_2 <- df1_1 %>% 
+  mutate(cum_guesser = cumsum(feedback) / seq_along(feedback),
+         cum_hider = cumsum(1 - feedback) / seq_along(feedback))
+
+# Using all 100 agents: 
+# Convert run1 (from "wide" to "long" format)
+df1_agents <- as.data.frame(run1)
+df1_agents$trial <- seq_len(n_trials)
+df1_long <- df1_agents %>%
+  pivot_longer(cols = -trial, names_to = "agent", values_to = "feedback") %>%
+  group_by(agent) %>%
+  mutate(cum_guesser = cumsum(feedback) / seq_along(feedback),
+         cum_hider = cumsum(1 - feedback) / seq_along(feedback))  # the inverse
+
+# Compute the average cumulative performance for both roles
+df1_avg <- df1_long %>%
+  group_by(trial) %>%
+  summarise(avg_guesser = mean(cum_guesser), avg_hider = mean(cum_hider))
+
+
+#Legend colors for plots
+colors <- c("Guesser: prob-WSLS" = "red", "Average Guesser" = "red", 
+            "Hider: determ-WSLS" = "blue", "Average Hider" = "blue")
+
+```
+
+### Plot of the last simulated agent pair
+```{r}
+ggplot(df1_1)+ 
+  geom_line(aes(trial, guesser_asym_wsls, color = "Guesser: prob-WSLS",)) +
+  geom_line(aes(trial, hider_wsls, color ="Hider: determ-WSLS"))+
+  labs(title = "Behaviour Plot: Probabilistic versus Deterministc WSLS",
+    x = "Trial", y = "Choice (0/1)", color = "Color legend")+
+  scale_color_manual(values = colors) + 
+  theme_minimal()
+ggsave("figs/run1_oneagent_beh.png", width = 10, height = 7)
+
+ggplot(df1_2)+ 
+  geom_line(aes(trial, cum_guesser, color = "Guesser: prob-WSLS",)) +
+  geom_line(aes(trial, cum_hider, color ="Hider: determ-WSLS"))+
+  labs(title = "Performance Plot: Probabilistic versus Deterministc WSLS",
+    x = "Trial", y = "Choice (0/1)", color = "Color legend")+
+  scale_color_manual(values = colors) + 
+  theme_minimal()
+ggsave("figs/run1_oneagent_perf.png", width = 10, height = 7)
+```
+
+
+### Plot of 100 simulated agent pairs (and averages)
+```{r}
+# Plot all individual agents with low alpha and overlay the average
+ggplot(df1_long) +
+  # individual guesser and average guesser
+  geom_line(aes(x = trial, y = cum_guesser, group = agent,  
+                color = "Guesser: prob-WSLS"), alpha = 0.05) +
+  geom_line(data = df1_avg, aes(x = trial, y = avg_guesser,  
+                               color = "Average Guesser"), size = 1) +
+  # individual hider and average hider
+  geom_line(aes(x = trial, y = cum_hider, group = agent, 
+                color = "Hider: determ-WSLS"), alpha = 0.05) +
+  geom_line(data = df1_avg, aes(x = trial, y = avg_hider, 
+                               color = "Average Hider"), size = 1) +
+  scale_x_continuous(limits = c(0, 120), breaks = seq(0, 120, by = 20)) +
+  labs(title = "Performance Plot: Probabilistic versus Deterministc WSLS",
+       x = "Trial", y = "Cumulative Performance", color = "")+
+  scale_color_manual(values = colors) + 
+  theme_minimal()
+ggsave("figs/run1_100agents_perf.png", width = 10, height = 7)
+```
+
+
+
+## Run number 2: Strategy 2 versus Strategy 3
+
+### Simulation 
+
+```{r}
+run2 <- array(NA, c(n_trials, n_agents))
+
+for (a in 1:n_agents){
+  
+  #empty lists for storing choices for each agent
+  guesser_memory <- rep(NA, n_trials)
+  hider_wsls <-  rep(NA, n_trials)
+  #first trial is based on nothing, i.e. random guess/hide
+  guesser_memory[1] <- random_agent(0.5) 
+  hider_wsls[1] <- random_agent(0.5) 
+
+  for (i in 2:n_trials){
+    if(guesser_memory[i-1] == hider_wsls[i-1]){
+      feedback <- 1
+    }
+    else{
+      feedback <- 0
+    }
+    hider_choices7 <- hider_wsls %>% na.omit() %>% rev()
+    hider_choices7 <- hider_choices7[1:7] %>% na.omit()#hiders choices on the previous 7 trials
+    
+    guesser_memory[i] <- memory_agent(hider_choices7, noise)
+    hider_wsls[i] <- WSLS_noise(hider_wsls[i-1], 1-feedback, noise)
+  }
+  
+  run2[, a] <- as.numeric(guesser_memory == hider_wsls)
+}
+```
+
+### Data frames
+Wrangling the data from the simulation (feedback) for plotting
+```{r}
+#using only the last simulation as an example: 
+df2_1 <- tibble(guesser_memory, hider_wsls, trial = seq(n_trials), 
+             feedback = as.numeric(guesser_memory == hider_wsls))
+df2_2 <- df2_1 %>% 
+  mutate(cum_guesser = cumsum(feedback) / seq_along(feedback),
+         cum_hider = cumsum(1 - feedback) / seq_along(feedback))
+
+# Using all 100 agents: 
+# Convert run1 (from "wide" to "long" format)
+df2_agents <- as.data.frame(run2)
+df2_agents$trial <- seq_len(n_trials)
+df2_long <- df2_agents %>%
+  pivot_longer(cols = -trial, names_to = "agent", values_to = "feedback") %>%
+  group_by(agent) %>%
+  mutate(cum_guesser = cumsum(feedback) / seq_along(feedback),
+         cum_hider = cumsum(1 - feedback) / seq_along(feedback))  # the inverse
+
+# Compute the average cumulative performance for both roles
+df2_avg <- df2_long %>%
+  group_by(trial) %>%
+  summarise(avg_guesser = mean(cum_guesser), avg_hider = mean(cum_hider))
+
+
+#Legend colors for plots
+colors2 <- c("Guesser: memory7" = "red", "Average Guesser" = "red", 
+            "Hider: determ-WSLS" = "blue", "Average Hider" = "blue")
+
+```
+
+### Plot of the last simulated agent pair
+```{r}
+ggplot(df2_1)+ 
+  geom_line(aes(trial, guesser_memory, color = "Guesser: memory7",)) +
+  geom_line(aes(trial, hider_wsls, color ="Hider: determ-WSLS"))+
+  labs(title = "Behaviour Plot: Memory model (7) versus Deterministc WSLS",
+    x = "Trial", y = "Choice (0/1)", color = "Color legend")+
+  scale_color_manual(values = colors2) + 
+  theme_minimal()
+ggsave("figs/run2_oneagent_beh.png", width = 10, height = 7)
+
+ggplot(df2_2)+ 
+  geom_line(aes(trial, cum_guesser, color = "Guesser: memory7",)) +
+  geom_line(aes(trial, cum_hider, color ="Hider: determ-WSLS"))+
+  labs(title = "Performance Plot: Memory model (7) versus Deterministc WSLS",
+    x = "Trial", y = "Choice (0/1)", color = "Color legend")+
+  scale_color_manual(values = colors2) + 
+  theme_minimal()
+ggsave("figs/run2_oneagent_perf.png", width = 10, height = 7)
+```
+
+
+### Plot of 100 simulated agent pairs (and averages)
+```{r}
+
+# Plot all individual agents with low alpha and overlay the average
+ggplot(df2_long) +
+  # individual guesser and average guesser
+  geom_line(aes(x = trial, y = cum_guesser, group = agent,  
+                color = "Guesser: memory7"), alpha = 0.05) +
+  geom_line(data = df2_avg, aes(x = trial, y = avg_guesser,  
+                               color = "Average Guesser"), size = 1) +
+  # individual hider and average hider
+  geom_line(aes(x = trial, y = cum_hider, group = agent, 
+                color = "Hider: determ-WSLS"), alpha = 0.05) +
+  geom_line(data = df2_avg, aes(x = trial, y = avg_hider, 
+                               color = "Average Hider"), size = 1) +
+  scale_x_continuous(limits = c(0, 120), breaks = seq(0, 120, by = 20)) +
+  labs(title = "Performance Plot: Memory model (7) versus Deterministc WSLS",
+       x = "Trial", y = "Cumulative Performance", color = "")+
+  scale_color_manual(values = colors2) + 
+  theme_minimal()
+ggsave("figs/run2_100agents_perf.png", width = 10, height = 7)
+```
+
+
+
+
+```{r}
+
+##fix the hider list so it doesnt include NAs 
+## feedback in run1 input to WSLS_noise model has to be inversed
+## I have changed the memory model 
+
+
+```
+
+
+
+
