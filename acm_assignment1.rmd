@@ -13,6 +13,7 @@ knitr::opts_chunk$set(echo = TRUE)
 # Setup
 ```{r}
 pacman::p_load(tidyverse, tidyr, dplyr, ggplot2)
+set.seed(100)
 ```
 
 # Strategy functions 
