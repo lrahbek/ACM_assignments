@@ -1,10 +1,9 @@
 # Assignment 1
 
-Advanced Cognitive Modeling (MSc in Cognitive Science) 
+This repository contains the code for assignment 1 in the course 'Advanced Cognitive Modeling' as a part of our Master in Cognitive Science.
+The project is completed by study group 2: Cassandra, Astrid, Sofie and Laura 
 
-Study group 2: Cassandra, Astrid, Sofie and Laura 
-
-Hand-in date: 18-02-2025
+*Hand-in date: 18-02-2025*
 
 
 ## Repo overview
