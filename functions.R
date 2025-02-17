@@ -1,7 +1,8 @@
 # ----- STRATEGY FUNCTIONS FOR ASSIGNMENT 1 ----
 
 # ---- strategy 1: Assymetric & Probabilistic WSLS (w. noise) ----
-WSLS_asym_noise <- function(prev_choice, feedback, WS_weight, LS_weight, noise){
+WSLS_asym_noise <- function(prev_choice, feedback,
+                            WS_weight, LS_weight, noise){
   if(feedback == 1){
     if(rbinom(1, 1, WS_weight) == 1){
       choice <- prev_choice
