@@ -1,7 +1,11 @@
 # Advanced Cognitive Modeling, assignments
 This repository contains the code for all assignments in the course 'Advanced Cognitive Modeling' as a part of our Master in Cognitive Science. 
 
-The project is completed by study group 2: Cassandra (201807186@post.au.dk), Astrid (au689496@edu.au.dk), Sofie (202106512@post.au.dk), and Laura (202106182@post.au.dk).
+The project is completed by study group 2:
+- Astrid Østergaard Iversen (au689496@edu.au.dk)
+- Cassandra Lyn Rempel (201807186@post.au.dk)
+- Laura Rahbek (202106182@post.au.dk)
+- Sofie Mosegaard (202106512@post.au.dk)
 
 
 ## Repo overview
