@@ -1,6 +1,6 @@
 # Assignment 1
-*Hand-in date: 18-02-2025*
-*By Astrid, Cassandra, Laura, & Sofie*
+- *Hand-in date: 18-02-2025*
+- *By Astrid, Cassandra, Laura, & Sofie*
 
 In this assignment, we will define and describe two possible strategies to play the Matching Pennies Game (MPG) and discuss their cognitive constraints. We will formalise these strategies with code and simulate their performance against a baseline model. Finally, we will visualise the results and discuss their implications.
 
@@ -16,4 +16,4 @@ The second strategy is based on the fact that human memory is limited, and it is
 
 A simple implementation of this cognitive constraint is the basis of the second strategy. For the formalisation of the model, we assume that the hider has a bias towards one of the possible hands. Therefore, for each trial the guesser chooses the hand which was most often the correct hand in the previous seven trials. For the first six trials, the probabilities are calculated based on the available information, e.g. in trial 4 the choice is based on the previous three trials.
 
-**The results and interpretation can be found in our report.**
+#### **The results and interpretation can be found in our report.**
