@@ -1,0 +1,159 @@
+---
+title: "assignment2_notes"
+output: html_document
+date: "2025-02-25"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#Install Packages 
+
+```{r}
+#Install rstan if not installed: 
+#install.packages("rstan", repos = c("https://mcstan.org/rpackages/", getOption ("repos")))
+library(rstan)
+
+pacman::p_load(tidyverse, here, posterior, cmdstanr, brms, tidybayes)
+```
+
+# Agent functions 
+```{r}
+# win-stay lose-shift model (with noise)
+WSLS_asym_noise <- function(prev_choice, feedback, WS_weight, LS_weight, noise){
+  if(feedback == 1){
+    if(rbinom(1, 1, WS_weight) == 1){
+      choice <- prev_choice
+    }
+    else{
+      choice <- 1 - prev_choice
+    }
+  }
+  else if (feedback == 0){
+    if(rbinom(1, 1, LS_weight) == 1){
+      choice <- 1 - prev_choice
+    }
+    else{
+      choice <- prev_choice
+    }  
+  }
+  if(rbinom(1, 1, noise) == 1){
+    choice <- rbinom(1, 1, .5)
+  }
+  return(choice)
+}
+
+# random agent 
+random_agent <- function(rate){
+  choice <- rbinom(1, 1, rate) 
+  return(choice)
+} 
+```
+
+# STAN CODE 
+This version can be compiled 
+```{r}
+stan_model <- "
+data{
+  // the number of trials (n) cannot be below 1 and should be integers
+  int <lower=1> n;
+  
+  // the choice (c) have length of number of trials and should be integers either 0 and 1 
+  array[n] int <lower=0, upper=1> choice;
+  
+  // the feedback (f) can either be 0 (loss) or 1 (win)
+  array[n] int <lower=0, upper=1> feedback;
+  
+}
+
+parameters{
+  // theta_win (the bias for staying when winning) can be real numbers between0 and 1
+  real <lower=0, upper=1> theta_WS;
+
+  // theta_loss (the for leaving when losing) can be real numbers between 0 and 1 
+  real <lower=0, upper=1> theta_LS;
+}
+
+transformed parameters{
+  vector[n] stay_choice;
+  vector[n] lose_choice;
+  //real theta;
+  vector[n] theta;
+  
+  for (trial in 1:n){
+  if(feedback[trial] == 1){
+    lose_choice[trial] = 0;
+    
+  if(choice[trial] == 1){
+    stay_choice[trial] = 1;
+  }
+  else if (choice[trial] == 0){
+    stay_choice[trial] = -1;
+  }
+  }
+  if(feedback[trial] == 0){
+    stay_choice[trial] = 0;
+    
+  if(choice[trial] == 1){
+    lose_choice[trial] = -1;
+  }
+  else if (choice[trial] == 0){
+    lose_choice[trial] = 1;
+  }
+  }
+  }
+  theta = theta_WS*stay_choice + theta_LS*lose_choice;
+}
+
+model{
+  //priors (same priors for both biases, but individual)
+  target += normal_lpdf(theta_WS | 0, 1);
+  target += normal_lpdf(theta_LS | 0, 1);
+  
+  //liklihood (model)
+
+  target += bernoulli_logit_lpmf(choice | theta);
+}
+"
+write_stan_file(
+  stan_model, dir = "stan/", basename = "WSLSasym.stan")
+```
+
+# SIMULATE DATA 
+```{r}
+n <- 120
+rate <- 0.8
+random_hider <- list(choice = rep(NA, 120))
+for (i in 1:n){
+  random_hider$choice[i] <- random_agent(rate)
+}
+
+data <- list(n = 120, h = dl$choice)
+## simulate guesser cghoice for wsls_asym based on the data from random hider:)) 
+WSLS_asym_noise()
+```
+
+
+# COMPILE MODEL 
+```{r}
+file <- file.path("stan/WSLSasym.stan")
+mod <- cmdstan_model(file, cpp_options = list(stan_threads = TRUE))
+
+samples <- mod$sample(
+  data = data,
+  seed = 123,
+  refresh = 500,
+  chains = 2,
+  parallel_chains = 2,
+  threads_per_chain = 2,
+  iter_warmup = 1000,
+  iter_sampling = 2000,
+  max_treedepth = 20,
+  adapt_delta = 0.99
+)
+
+samples$summary()
+```
+
+
