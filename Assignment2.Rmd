@@ -1,0 +1,221 @@
+---
+title: "Assignment2"
+author: "Cassandra Rempel"
+date: "2025-02-18"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#load the packages
+pacman::p_load(tidyverse, tidyr, dplyr, ggplot2, cmdstanr, dplyr)
+
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+Remember that the minimal Stan model requires 3 chunks, one specifying the data it will need as input; one specifying the parameters to be estimated; one specifying the model within which the parameters appear, and the priors for those parameters.
+
+In the assignment you need to build and validate a cognitive model of matching pennies behavior using Stan. As an outcome of this you will have to produce a text (+ plots) document (linked to a github repo) in which you:
+describe the model you are working on (N.B. it doesn't need to be one from Assignment 1)
+showcase a commented version of the stan model (what does each line do?)
+discuss model quality of the model (predictive prior and posterior checks, prior-posterior update checks, etc.)
+describe a process of parameter recovery (why are you doing it?, how are you doing it?)
+discuss the results: can you recover the parameter values? How many trials should be used at least to properly recover the parameters? What’s the role of priors? Add relevant plot(s).
+N.B. to pass it's enough to use the single agent model, but if you want to learn more (at the cost of more time investment), you could
+
+agents: The number of agents (players).
+trials: The number of trials (rounds of the game).
+choice[agents, trials]: The binary choice of each agent in each trial (0 or 1).
+opponent[agents, trials]: The opponent’s choice in each trial (0 or 1).
+
+```{r}
+
+set.seed(123)
+
+agents <- 100  # Number of agents
+trials <- 100  # Number of trials
+
+# True WSLS probabilities
+p_stay_win <- runif(agents, 0.6, 0.9)  # Probability of staying after a win
+p_shift_lose <- runif(agents, 0.6, 0.9) # Probability of switching after a loss
+
+# Initialise choices and opponent moves
+choice_data <- matrix(NA, nrow = agents, ncol = trials)
+opponent_data <- matrix(sample(0:1, agents * trials, replace = TRUE), nrow = agents, ncol = trials)
+
+# Simulate WSLS choices
+for (i in 1:agents) {
+  choice_data[i, 1] <- sample(0:1, 1)  # Random first move
+
+  for (t in 2:trials) {
+    prev_choice <- choice_data[i, t - 1]
+    prev_opponent <- opponent_data[i, t - 1]
+    win <- (prev_choice == prev_opponent)  # Win condition
+
+    if (win) {
+      choice_data[i, t] <- ifelse(runif(1) < p_stay_win[i], prev_choice, 1 - prev_choice)
+    } else {
+      choice_data[i, t] <- ifelse(runif(1) < p_shift_lose[i], 1 - prev_choice, prev_choice)
+    }
+  }
+}
+
+# Create Stan data list
+stan_data <- list(
+  agents = agents,
+  trials = trials,
+  choice = choice_data,
+  opponent = opponent_data
+)
+
+
+```
+    
+    #specify choosing range 0 to 1 #not just 50/50, an influence of preference #include the bias into the choice, if we win then stay but include bias onto next choice
+Parameters
+p_stay_win: Probability of staying with the same choice after a win.
+p_shift_lose: Probability of shifting to a different choice after a loss.
+bias[agents]: Agent-specific bias (how much they deviate from the strategy).
+
+Model
+p_stay_win ~ beta(2,2): Prior belief that agents typically stay after a win.
+p_shift_lose ~ beta(2,2): Prior belief that agents typically switch after a loss.
+bias ~ normal(0,1): Each agent has a bias, allowing individual differences.
+
+prev_choice: What did the agent choose last?
+prev_opponent: What did the opponent choose last?
+win: Did the agent win? (prev_choice == prev_opponent)
+
+If the agent won (win = 1), they are more likely to stay with the same choice.
+If they lost (win = 0), they are more likely to switch.
+This behavior is controlled by p_stay_win and p_shift_lose.
+
+Adding the Bias
+logit_p = bias[i] + logit(p_stay_win); for wins
+logit_p = bias[i] + logit(p_shift_lose); for losses
+
+The agent makes a decision using bernoulli_logit(logit_p), meaning the probability of choosing 1 or 0 is determined by the logistic function of logit_p.
+    
+```{r cars}
+#explain the bias
+stan_model_code <- "
+data { 
+  int<lower=1> agents;
+  int<lower=1> trials;
+  array[agents, trials] int<lower=0, upper=1> choice;
+  array[agents, trials] int<lower=0, upper=1> opponent;
+}
+
+parameters {
+  real<lower=0, upper=1> p_stay_win;
+  real<lower=0, upper=1> p_shift_lose;
+  array[agents] real bias; 
+}
+
+model {
+  p_stay_win ~ beta(2, 2);
+  p_shift_lose ~ beta(2, 2);
+  bias ~ normal(0, 1);
+
+  for (i in 1:agents) {
+    for (t in 2:trials) {
+      int prev_choice = choice[i, t - 1];
+      int prev_opponent = opponent[i, t - 1];
+      int win = (prev_choice == prev_opponent);
+      
+      real logit_p; 
+      if (win) {
+        logit_p = bias[i] + logit(p_stay_win);
+      } else {
+        logit_p = bias[i] + logit(p_shift_lose);
+      }
+      
+      choice[i, t] ~ bernoulli_logit(logit_p);
+    }
+  }
+}
+
+"
+
+```
+
+Compiles the Stan model.
+Translates the Stan code into an optimized C++ program that can run efficiently.
+This compiled model (mod) is now ready to sample from the posterior.
+```{r pressure, echo=FALSE}
+
+#Compiles the Stan model.
+#Translates the Stan code into an optimized C++ program that can run efficiently.
+#This compiled model (mod) is now ready to sample from the posterior.
+writeLines(stan_model_code, con = "wsls_model.stan")
+mod <- cmdstan_model("wsls_model.stan")
+
+# Fit model
+fit <- mod$sample(
+  data = stan_data,
+  seed = 42, #Sets a random seed for reproducibility
+  chains = 4, #Runs 4 separate MCMC chains (to check that they converge to the same result). Each chain is an independent Markov Chain #exploring the posterior.
+  parallel_chains = 4, #Runs all 4 chains in parallel to speed up computation
+  iter_warmup = 2000,#These help the sampler tune itself and are discarded from the final results
+  iter_sampling = 2000 #actual sampling
+)
+
+#Saves the fitted model 
+fit$save_object(file = "wsls_results.RDS")
+
+```
+WSLS is designed to estimate the probabilities that an agent (player) will stay with their previous choice after a win (p_stay_win) or switch their choice after a loss (p_shift_lose). It includes individual bias terms to account for variation in agent preferences.
+
+Tried to evaluate if the data from simulation was good quality
+Both p_stay_win and p_shift_lose hover around 0.5.
+Will need to modify simulation to be more realistic
+The model isn't capturing true variation in agent behavior
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+```{r}
+#Summarises the estimated parameters 
+fit$summary() 
+draws_df <- as_draws_df(fit$draws()) 
+# Extract posterior samples, this dataframe contains one row per iteration per chain.
+posterior_samples <- fit$draws(format = "df")
+
+#Calculates mean estimated values
+p_stay_win_est <- mean(posterior_samples$p_stay_win)
+p_shift_lose_est <- mean(posterior_samples$p_shift_lose)
+
+# Create DataFrame
+df_wsls <- data.frame(
+  Parameter = c("p_stay_win", "p_shift_lose"),
+  True_Value = c(mean(p_stay_win), mean(p_shift_lose)),
+  Estimated_Value = c(p_stay_win_est, p_shift_lose_est) #The posterior mean from MCMC
+)
+
+# Plot Posterior Chains: `p_stay_win`
+ggplot(draws_df, aes(x = .iteration, y = p_stay_win, group = .chain, color = factor(.chain))) +
+  geom_line(alpha = 0.5) +
+  labs(title = "Trace Plot: p_stay_win", x = "Iteration", y = "p_stay_win") +
+  theme_classic()
+
+# Plot Posterior Chains: `p_shift_lose`
+ggplot(draws_df, aes(x = .iteration, y = p_shift_lose, group = .chain, color = factor(.chain))) +
+  geom_line(alpha = 0.5) +
+  labs(title = "Trace Plot: p_shift_lose", x = "Iteration", y = "p_shift_lose") +
+  theme_classic()
+
+
+```
+
+```{r}
+
+
+
+
+
+```
+
