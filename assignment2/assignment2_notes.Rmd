@@ -22,22 +22,21 @@ pacman::p_load(tidyverse, here, posterior, cmdstanr, brms, tidybayes)
 ```{r}
 # win-stay lose-shift model (with noise)
 WSLS_asym_noise <- function(prev_choice, feedback, WS_weight, LS_weight, noise){
-  if(feedback == 1){
+  if(feedback == 1){  # win
     if(rbinom(1, 1, WS_weight) == 1){
       choice <- prev_choice
-    }
-    else{
+    } else{
       choice <- 1 - prev_choice
     }
   }
-  else if (feedback == 0){
+  else if (feedback == 0){  # loss
     if(rbinom(1, 1, LS_weight) == 1){
       choice <- 1 - prev_choice
-    }
-    else{
+    } else{
       choice <- prev_choice
     }  
   }
+  # introduce noise
   if(rbinom(1, 1, noise) == 1){
     choice <- rbinom(1, 1, .5)
   }
@@ -120,18 +119,38 @@ write_stan_file(
   stan_model, dir = "stan/", basename = "WSLSasym.stan")
 ```
 
+
 # SIMULATE DATA 
 ```{r}
-n <- 120
+set.seed(123)
+
+n_trials <- 120
 rate <- 0.8
-random_hider <- list(choice = rep(NA, 120))
-for (i in 1:n){
-  random_hider$choice[i] <- random_agent(rate)
+
+WS_weight <- 0.8
+LS_weight <- 0.3
+noise <- 0.1
+
+choices <- numeric(n_trials)
+feedbacks <- rbinom(n_trials, 1, 0.5) # random wins/losses
+
+choice[1] <- random_agent(rate)
+
+for (t in 2:n_trials) {
+  choices[t] <- WSLS_asym_noise(choices[t - 1], feedbacks[t - 1], WS_weight, LS_weight, noise)
 }
 
-data <- list(n = 120, h = dl$choice)
-## simulate guesser cghoice for wsls_asym based on the data from random hider:)) 
-WSLS_asym_noise()
+df <- tibble(
+  trial = 1:n_trials,
+  choice = choices,
+  feedback = feedbacks)
+
+data <- list(
+  n = n_trials,
+  choice = df$choice,
+  feedback = df$feedback
+)
+
 ```
 
 
@@ -155,5 +174,11 @@ samples <- mod$sample(
 
 samples$summary()
 ```
+
+
+
+
+
+
 
 
