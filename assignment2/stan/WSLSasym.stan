@@ -12,7 +12,7 @@ data{
 }
 
 parameters{
-  // theta_win (the bias for staying when winning) can be real numbers between0 and 1
+  // theta_win (the bias for staying when winning) can be real numbers between 0 and 1
   real <lower=0, upper=1> theta_WS;
 
   // theta_loss (the for leaving when losing) can be real numbers between 0 and 1 

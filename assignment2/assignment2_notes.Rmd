@@ -13,7 +13,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r}
 #Install rstan if not installed: 
 #install.packages("rstan", repos = c("https://mcstan.org/rpackages/", getOption ("repos")))
-library(rstan)
+library(rstan, ggplot2, dplyr)
 
 pacman::p_load(tidyverse, here, posterior, cmdstanr, brms, tidybayes)
 ```
@@ -189,14 +189,16 @@ draws_df <- as_draws_df(samples$draws())
 
 # Checking the model's chains for both WS and LS theta
 ```{r}
-
 ggplot(draws_df, aes(.iteration, theta_WS, group = .chain, color = .chain)) +
   geom_line() +
   theme_classic()
+ggsave("figs/MCMC_trace_plot_theta_WS_prob_scale.png", width = 10, height = 7)
 
 ggplot(draws_df, aes(.iteration, theta_LS, group = .chain, color = .chain)) +
   geom_line() +
   theme_classic()
+ggsave("figs/MCMC_trace_plot_theta_LS_prob_scale.png", width = 10, height = 7)
+
 ```
 
 Both of them looks fine, as we have defined them to be between 0 and 1.
@@ -206,10 +208,13 @@ However, lets look the parameters on a logit scale:
 ggplot(draws_df, aes(.iteration, logit_scaled(theta_WS), group = .chain, color = .chain)) +
   geom_line() +
   theme_classic()
+ggsave("figs/MCMC_trace_plot_theta_WS_logit_scale.png", width = 10, height = 7)
 
 ggplot(draws_df, aes(.iteration, logit_scaled(theta_LS), group = .chain, color = .chain)) +
   geom_line() +
   theme_classic()
+ggsave("figs/MCMC_trace_plot_theta_LS_logit_scale.png", width = 10, height = 7)
+
 ```
 
 Great! Here, we can see that the theta_WS goes to +infinity and theta_LS goes to -infinity.
@@ -229,6 +234,7 @@ ggplot(draws_df) +
   xlab("Rate") +
   ylab("Posterior Density") +
   theme_classic()
+ggsave("figs/theta_WS_prior.png", width = 10, height = 7)
 
 ggplot(draws_df) +
   geom_density(aes(theta_LS), fill = "blue", alpha = 0.3) +
@@ -238,6 +244,7 @@ ggplot(draws_df) +
   xlab("Rate") +
   ylab("Posterior Density") +
   theme_classic()
+ggsave("figs/theta_LS_prior.png", width = 10, height = 7)
 
 ```
 
@@ -382,9 +389,11 @@ ggplot(draws_df_2) +
 fill="blue", alpha=0.3, bins=90) +
  geom_point(x = sum(data$choice), y = 0, color="red", shape = 17, 
 size = 5) +
- xlab("Predicted right hands out of 120 trials") +
+ xlab("Predicted right hands at trial 100 (probability scale)") +
  ylab("Prior count") +
  theme_classic()
+ggsave("figs/theta_prior_predictive_checks_prob_scale_n100.png", width = 10, height = 7)
+
 
 # logit space
 ggplot(draws_df_2) +
@@ -392,12 +401,50 @@ ggplot(draws_df_2) +
 fill="blue", alpha=0.3, bins=90) +
  geom_point(x = sum(data$choice), y = 0, color="red", shape = 17, 
 size = 5) +
- xlab("Predicted right hands out of 120 trials") +
+ xlab("Predicted right hands at trial 100 (logit scale)") +
  ylab("Prior count") +
  theme_classic()
+ggsave("figs/theta_prior_predictive_checks_logit_scale_n100.png", width = 10, height = 7)
+
 ```
 
 Before the model sees the data, the model thinks that all values are propable but especially values "in the middle" is likely. The extreme values are discounted.
+
+
+```{r}
+# some data wrangling so I can plot all trials at once
+# prob. space
+draws_long_p <- draws_df_2 %>%
+  pivot_longer(cols = starts_with("theta_prior_pred_p["), 
+               names_to = "trial", 
+               values_to = "theta_prior_pred_p") %>%
+  mutate(trial = as.numeric(gsub("theta_prior_pred_p\\[|\\]", "", trial)))
+
+ggplot(draws_long_p) +
+ geom_histogram(aes(theta_prior_pred_p), color = "darkblue", fill = "blue", alpha = 0.3, bins = 90) +
+ geom_point(x = sum(data$choice), y = 0, color = "red", shape = 17, size = 5) +
+ xlab("Predicted right hands out of 120 trials (probability scale)") +
+ ylab("Prior count") +
+ theme_classic()
+ggsave("figs/theta_prior_predictive_checks_prop_scale.png", width = 10, height = 7)
+
+
+# logit space
+draws_long_l <- draws_df_2 %>%
+  pivot_longer(cols = starts_with("theta_prior_pred_logit["), 
+               names_to = "trial", 
+               values_to = "theta_prior_pred_l") %>%
+  mutate(trial = as.numeric(gsub("theta_prior_pred_logit\\[|\\]", "", trial)))
+
+ggplot(draws_long_l) +
+ geom_histogram(aes(theta_prior_pred_l), color = "darkblue", fill = "blue", alpha = 0.3, bins = 90) +
+ geom_point(x = sum(data$choice), y = 0, color = "red", shape = 17, size = 5) +
+ xlab("Predicted right hands out of 120 trials (logit scale)") +
+ ylab("Prior count") +
+ theme_classic()
+ggsave("figs/theta_prior_predictive_checks_logit_scale.png", width = 10, height = 7)
+
+```
 
 
 ```{r}
@@ -416,11 +463,61 @@ size = 5) +
 
 ```
 
+
+# PRIOR-POSTERIOR UPDATES CHECKS
+
+```{r}
+# Reshape the draws for posterior predictions
+draws_posterior_long <- draws_df_2 %>%
+  pivot_longer(cols = starts_with("theta_posterior_preds["), 
+               names_to = "trial", 
+               values_to = "theta_posterior_pred") %>%
+  mutate(trial = as.numeric(gsub("theta_posterior_preds\\[|\\]", "", trial)))
+
+# Reshape the draws for prior predictions
+draws_prior_long <- draws_df_2 %>%
+  pivot_longer(cols = starts_with("theta_prior_preds["), 
+               names_to = "trial", 
+               values_to = "theta_prior_pred") %>%
+  mutate(trial = as.numeric(gsub("theta_prior_preds\\[|\\]", "", trial)))
+```
+
+```{r}
+ggplot() +
+  geom_density(data = draws_posterior_long, aes(x = theta_posterior_pred, fill = "Posterior"), alpha = 0.3) +
+  geom_density(data = draws_prior_long, aes(x = theta_prior_pred, fill = "Prior"), alpha = 0.3) +
+  geom_vline(xintercept = 0.8, color = "red", linetype = "dashed") +
+  xlab("Rate") +
+  ylab("Density") +
+  scale_fill_manual(values = c("blue", "red")) +
+  theme_classic() +
+  theme(legend.title = element_blank(), legend.position = "top")
+```
+
+
+```{r}
+ggplot() +
+  geom_density(data = draws_posterior_long, aes(x = theta_posterior_pred, fill = "Posterior"), alpha = 0.3) +
+  geom_density(data = draws_prior_long, aes(x = theta_prior_pred, fill = "Prior"), alpha = 0.3) +
+  geom_vline(xintercept = 0.8, color = "red", linetype = "dashed") +
+  xlab("Rate") +
+  ylab("Density") +
+  scale_fill_manual(values = c("blue", "red")) +
+  scale_x_continuous(
+    limits = c(0, 1),  # Adjust the range of the x-axis to focus around 0
+    breaks = seq(0, 1, by = 0.1)) +
+  theme_classic() +
+  theme(legend.title = element_blank(), legend.position = "top")
+```
+
+
+
+
 # PRIOR-POSTERIOR UPDATES CHECKS
 ```{r}
 ggplot(draws_df_2) +
- geom_density(aes(`theta_posterior_preds[100]`), fill="blue", alpha=0.3) +
- geom_density(aes(`theta_prior_preds[100]`), fill="red", alpha=0.3) +
+ geom_density(aes(theta_posterior), fill="blue", alpha=0.3) +
+ geom_density(aes(theta_prior), fill="red", alpha=0.3) +
  geom_vline(xintercept = 0.8) +
  xlab("Rate") +
  ylab("Posterior Density") +
