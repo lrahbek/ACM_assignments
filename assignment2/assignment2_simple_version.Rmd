@@ -1,0 +1,227 @@
+---
+title: "Assignment 2 - simple vers"
+output: html_document
+date: "2025-03-06"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Install Packages 
+
+```{r}
+library(rstan, ggplot2, dplyr)
+pacman::p_load(tidyverse, here, posterior, cmdstanr, brms, tidybayes)
+```
+
+# Simulation functions 
+```{r}
+# probabilistic win-stay lose-shift model (with noise)
+WSLS_asym_noise <- function(prev_choice, feedback, WS_weight, LS_weight, noise){
+  if(feedback == 1){  # win
+    if(rbinom(1, 1, WS_weight) == 1){
+      choice <- prev_choice
+    } else{
+      choice <- 1 - prev_choice
+    }
+  }
+  else if (feedback == 0){  # loss
+    if(rbinom(1, 1, LS_weight) == 1){
+      choice <- 1 - prev_choice
+    } else{
+      choice <- prev_choice
+    }  
+  }
+  # introduce noise
+  if(rbinom(1, 1, noise) == 1){
+    choice <- rbinom(1, 1, .5)
+  }
+  return(choice)
+}
+
+# random agent 
+random_agent <- function(rate){
+  choice <- rbinom(1, 1, rate) 
+  return(choice)
+} 
+```
+
+# SIMULATE DATA 
+```{r}
+n <- 120 #number of trials 
+
+## simulate choices by random agent (as hider)
+rate <- 0.5 #bias for random agent 
+random_hider <- list(choice = rep(NA, n)) #empty list of choices made by hider
+for (i in 1:n){
+  random_hider$choice[i] <- random_agent(rate)
+}
+
+## simulate choices made by wsls (as guesser) based on the random agent 
+WS_weight <- 0.6
+LS_weight <- 0.4
+noise <- 0 #no noise added 
+wsls_guesser <- list(choice = rep(NA, n), #empty list of choices made by guesser
+                     feedback = rep(NA, n)) #empty list for feedback for guesser
+
+for(i in 1:n){
+  if(i == 1){
+    wsls_guesser$choice[i] <- random_agent(0.5)
+  }
+  if(i>1){
+    if(wsls_guesser$choice[i-1] == random_hider$choice[i-1]){
+      wsls_guesser$feedback[i-1] <- 1
+    }
+    else{
+      wsls_guesser$feedback[i-1] <- 0
+    }
+    wsls_guesser$choice[i] <- WSLS_asym_noise(wsls_guesser$choice[i-1], 
+                                     wsls_guesser$feedback[i-1],
+                                     WS_weight, LS_weight, noise)
+  }
+  if(i == n){
+    if(wsls_guesser$choice[n] == random_hider$choice[n]){
+      wsls_guesser$feedback[n] <- 1
+    }
+    else{
+      wsls_guesser$feedback[n] <- 0
+    }
+  }
+}
+
+#combine data for model into list
+data <- list(n = n, choice = wsls_guesser$choice, feedback =  wsls_guesser$feedback)
+```
+
+
+# STAN code 
+```{r}
+stan_model <- "
+data{
+  // the number of trials (n) cannot be below 1 and should be integers
+  int <lower=1> n;
+  
+  // the choice have length of number of trials and should be integers either 0 and 1 
+  array[n] int <lower=0, upper=1> choice;
+  
+  // the feedback can either be 0 (loss) or 1 (win)
+  array[n] int <lower=0, upper=1> feedback;
+  
+}
+
+parameters{
+  // theta_win (the bias for staying when winning) log odds scale
+  real theta_WS;
+  // theta_loss (the for leaving when losing) log odds scale
+  real theta_LS;
+}
+
+transformed parameters{
+  vector[n] stay_choice; 
+  vector[n] lose_choice;
+  vector[n] theta;
+  
+  for (trial in 1:n){
+   if(feedback[trial] == 1){
+     lose_choice[trial] = 0;
+     
+     if(choice[trial] == 1){
+       stay_choice[trial] = 1;
+     }
+     else if (choice[trial] == 0){
+       stay_choice[trial] = -1;
+     }
+   }
+   if(feedback[trial] == 0){
+     stay_choice[trial] = 0;
+     if(choice[trial] == 1){
+       lose_choice[trial] = -1;
+     }
+     else if (choice[trial] == 0){
+       lose_choice[trial] = 1;
+     }
+   }
+  }
+ 
+  theta = theta_WS*stay_choice + theta_LS*lose_choice;
+}
+
+model{
+  //priors (same priors for both biases, but individual)
+  target += normal_lpdf(theta_WS | 0, 1);
+  target += normal_lpdf(theta_LS | 0, 1);
+  
+  //liklihood (model)
+
+  target += bernoulli_logit_lpmf(choice | theta);
+  
+}
+generated quantities{
+  // defining variables: 
+  // theta_WS and theta_LS prior and posterior parameters on probability scales
+  real<lower=0, upper=1> theta_WS_prior;  
+  real<lower=0, upper=1> theta_LS_prior;  
+  real<lower=0, upper=1> theta_WS_posterior;  
+  real<lower=0, upper=1> theta_LS_posterior;  
+  
+  // generating variables
+  // theta_WS and theta_LS prior and posterior parameters on probability scales 
+  theta_WS_prior = inv_logit(normal_rng(0,1)); 
+  theta_LS_prior = inv_logit(normal_rng(0,1)); 
+
+  theta_WS_posterior = inv_logit(theta_WS); 
+  theta_LS_posterior = inv_logit(theta_LS); 
+}
+"
+
+write_stan_file(
+  stan_model, dir = "stan/", basename = "WSLSasym.stan")
+```
+
+# COMPILE MODEL 
+```{r}
+file <- file.path("stan/WSLSasym.stan")
+mod <- cmdstan_model(file, cpp_options = list(stan_threads = TRUE))
+
+samples <- mod$sample(
+  data = data,
+  seed = 123,
+  refresh = 500,
+  chains = 2,
+  parallel_chains = 2,
+  threads_per_chain = 2,
+  iter_warmup = 1000,
+  iter_sampling = 2000,
+  max_treedepth = 20,
+  adapt_delta = 0.99
+)
+
+samples$summary()
+```
+
+# PLOT PRIOR-POSTERIOR UPDATE CHECKS 
+```{r}
+draws_df <- as_draws_df(samples$draws())
+ggplot(draws_df) +
+  geom_density(aes(theta_WS_posterior), fill = "blue", alpha = 0.3) +
+  geom_density(aes(theta_WS_prior), fill = "red", alpha = 0.3) +
+  geom_vline(xintercept = WS_weight, linetype = "dashed", color = "black", size = 1) +
+  ggtitle("Prior Posterior Update Checks: THETA WIN-STAY")+
+  xlab("Rate") +
+  ylab("Estimate Densities") +
+  theme_classic()
+ggsave("figs/prior_post_update_thetaLS.png")
+
+ggplot(draws_df) +
+  geom_density(aes(theta_LS_posterior), fill = "blue", alpha = 0.3) +
+  geom_density(aes(theta_LS_prior), fill = "red", alpha = 0.3) +
+  geom_vline(xintercept = LS_weight, linetype = "dashed", color = "black", size = 1) +
+  ggtitle("Prior Posterior Update Checks: THETA LOSE-SHIFT")+
+  xlab("Rate") +
+  ylab("Estimate Densities") +
+  theme_classic()
+ggsave("figs/prior_post_update_thetaWS.png")
+```
+
+
