@@ -1,0 +1,458 @@
+---
+title: "New_attempt_assign2"
+author: "Cassandra Rempel"
+date: "2025-03-06"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# Install rstan if not already installed
+# install.packages("rstan", repos = c("https://mcstan.org/rpackages/", getOption("repos")))
+library(rstan)
+library(ggplot2)
+pacman::p_load(tidyverse, here, posterior, cmdstanr, brms, tidybayes, dplyr, bayesplot, patchwork)
+
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+##AGENT FUNCTIONS
+```{r cars}
+# Win-Stay Lose-Shift model with noise
+WSLS_asym_noise <- function(prev_choice, feedback, WS_weight, LS_weight, noise) {
+  if (feedback == 1) {  # Win
+    choice <- ifelse(rbinom(1, 1, WS_weight) == 1, prev_choice, 1 - prev_choice)
+  } else {               # Loss
+    choice <- ifelse(rbinom(1, 1, LS_weight) == 1, 1 - prev_choice, prev_choice)
+  }
+  # Introduce reduced noise
+  if (rbinom(1, 1, noise) == 1) {
+    choice <- rbinom(1, 1, 0.5)
+  }
+  return(choice)
+}
+
+# Random agent function
+random_agent <- function(rate) {
+  return(rbinom(1, 1, rate))
+}
+
+```
+
+## Stan Code
+
+```{r pressure, echo=FALSE}
+stan_model_code <- "
+data {
+  int<lower=1> n;                          // Number of trials
+  array[n] int<lower=0, upper=1> choice;    // Choices: 0 or 1
+  array[n] int<lower=0, upper=1> feedback;  // Feedback: 0 (loss) or 1 (win)
+}
+
+parameters {
+  real beta;
+  real<lower=0, upper=1> theta_WS;          // Win-stay probability
+  real<lower=0, upper=1> theta_LS;          // Lose-shift probability
+}
+
+transformed parameters {
+  vector[n] theta;
+  for (i in 1:n) {
+    theta[i] = (feedback[i] == 1) ? theta_WS * (2 * choice[i] - 1) :
+               theta_LS * (1 - 2 * choice[i]);
+  }
+}
+
+model {
+  // Priors on hyperparameters
+  theta_WS ~ beta(6, 2);       // Prior for theta_WS
+  theta_LS ~ beta(3, 5);       // Prior for theta_LS
+  beta ~ normal(0, 1);         // Updated prior for beta (stronger prior to control extreme values)
+  
+  // Likelihood: Agent's choices follow current rate estimates
+  choice ~ bernoulli_logit(theta);
+}
+
+"
+write_stan_file(stan_model_code, dir = "stan/", basename = "WSLSasym_improved.stan")
+
+
+```
+
+##Simulate the Code
+
+```{r}
+set.seed(123)
+n_trials <- 300     # Increased trials for more information
+rate <- 0.8
+WS_weight <- 0.8
+LS_weight <- 0.3
+noise <- 0.05       # Reduced noise to improve signal clarity
+
+choices <- numeric(n_trials)
+feedbacks <- rbinom(n_trials, 1, 0.5)
+choices[1] <- random_agent(rate)
+
+for (t in 2:n_trials) {
+  choices[t] <- WSLS_asym_noise(choices[t - 1], feedbacks[t - 1], WS_weight, LS_weight, noise)
+}
+
+data <- list(
+  n = n_trials,
+  choice = choices,
+  feedback = feedbacks
+)
+
+file <- file.path("stan/WSLSasym_improved.stan")
+mod <- cmdstan_model(file, cpp_options = list(stan_threads = TRUE))
+
+samples <- mod$sample(
+  data = data,
+  seed = 123,
+  chains = 2,
+  parallel_chains = 2,
+  threads_per_chain = 2,
+  iter_warmup = 1000,
+  iter_sampling = 2000,
+  adapt_delta = 0.99,  # Increase to reduce divergences
+  max_treedepth = 20    # Increase to allow better exploration
+)
+
+samples$summary()
+
+```
+#Chains and Chains
+
+Trace Plot for theta_WS (Win-Stay Parameter):
+
+Good Mixing: The two chains (in cyan and magenta) overlap well and move freely across the parameter space.
+Stationarity: The chains are stable, without upward or downward trends, suggesting convergence.
+Consistent Mean: The chains seem to hover consistently between 0.9 and 1.0, indicating that the posterior distribution is well-explored.
+
+Trace Plot for theta_LS (Lose-Shift Parameter):
+
+Good Mixing: Similar to theta_WS, the chains overlap well, suggesting good mixing.
+Stationarity: The chains are stable without visible trends, which is a good sign of convergence.
+Wider Range: The chains explore a wider range (from 0.0 to 0.1+), indicating more uncertainty in this parameter compared to theta_WS.
+
+
+```{r}
+draws_df <- as_draws_df(samples$draws()) %>%
+  subset_draws(variable = c("theta_WS", "theta_LS", "beta")) %>%
+  as_tibble()
+
+draws <- as_draws_array(samples$draws())
+
+ggplot(draws_df, aes(x = .iteration, y = theta_WS, group = .chain, color = factor(.chain))) +
+  geom_line() +
+  theme_classic() +
+  labs(title = "Trace Plot for theta_WS", x = "Iteration", y = "theta_WS")
+
+ggplot(draws_df, aes(x = .iteration, y = theta_LS, group = .chain, color = factor(.chain))) +
+  geom_line() +
+  theme_classic() +
+  labs(title = "Trace Plot for theta_LS", x = "Iteration", y = "theta_LS")
+
+# summary
+summary_df <- samples$summary()
+
+# Filter and display R-hat and ESS for key parameters
+summary_df %>%
+  filter(grepl("theta_WS|theta_LS|beta", variable)) %>%
+  select(variable, mean, sd, rhat, ess_bulk, ess_tail) %>%
+  mutate(
+    rhat_check = ifelse(rhat < 1.01, "Good", "Check"),
+    ess_check = ifelse(ess_bulk > 400, "Sufficient", "Low")
+  )
+
+draws_df <- as_draws_df(samples$draws()) %>%
+  subset_draws(variable = c("theta_WS", "theta_LS")) %>%
+  as_tibble() %>%  # Convert to tibble for easier manipulation
+  mutate(
+    theta_WS_prior = rbeta(nrow(.), 6, 2),
+    theta_LS_prior = rbeta(nrow(.), 3, 5)
+  )
+
+# Trace plot with improved colors
+mcmc_trace(draws, pars = c("theta_WS", "theta_LS"), 
+           facet_args = list(nrow = 2)) +
+  theme_minimal() +
+  ggtitle("Trace Plots for theta_WS and theta_LS")
+
+```
+The model parameters suggest that the agent has a strong tendency to repeat choices following a win (theta_WS = 0.9565) and rarely switches choices after a loss (theta_LS = 0.0360). The near-zero effect size for beta (-0.0017) implies that the covariate in the model does not significantly influence the agent's decision-making process. The low standard deviations and effective sample sizes for these parameters indicate reliable estimates with good convergence across Markov chains.
+
+rhat ≈ 1 so chains are converging well. 
+
+Parameters for Markov Chains - from references below
+Rhat function produces R-hat convergence diagnostic, which compares the between- and within-chain estimates for model parameters and other univariate quantities of interest. If chains have not mixed well (ie, the between- and within-chain estimates don't agree), R-hat is larger than 1. We recommend running at least four chains by default and only using the sample if R-hat is less than 1.05. Stan reports R-hat which is the maximum of rank normalized split-R-hat and rank normalized folded-split-R-hat, which works for thick tailed distributions and is sensitive also to differences in scale.
+
+The ess_bulk function produces an estimated Bulk Effective Sample Size (bulk-ESS) using rank normalized draws. Bulk-ESS is useful measure for sampling efficiency in the bulk of the distribution (related e.g. to efficiency of mean and median estimates), and is well defined even if the chains do not have finite mean or variance.
+
+The ess_tail function produces an estimated Tail Effective Sample Size (tail-ESS) by computing the minimum of effective sample sizes for 5% and 95% quantiles. Tail-ESS is useful measure for sampling efficiency in the tails of the distribution (related e.g. to efficiency of variance and tail quantile estimates).
+
+Both bulk-ESS and tail-ESS should be at least 100 (approximately) per Markov Chain in order to be reliable and indicate that estimates of respective posterior quantiles are reliable.
+
+References
+https://mc-stan.org/docs/2_19/reference-manual/markov-chains.html
+https://mc-stan.org/rstan/reference/Rhat.html
+https://fusaroli.github.io/AdvancedCognitiveModeling2023/from-simulation-to-model-fitting.html
+##Posterior vs Prior Comparison 
+
+```{r}
+# Plot for theta_WS
+ggplot(draws_df) +
+  geom_density(aes(theta_WS), fill = "skyblue", alpha = 0.5) +
+  geom_density(aes(theta_WS_prior), fill = "lightgreen", alpha = 0.3) +
+  geom_vline(xintercept = 0.8, linetype = "dashed", color = "red") +
+  labs(title = "Posterior vs Prior for theta_WS",
+       x = "theta_WS",
+       y = "Density") +
+  theme_minimal()
+
+# Plot for theta_LS
+ggplot(draws_df) +
+  geom_density(aes(theta_LS), fill = "lightcoral", alpha = 0.5) +
+  geom_density(aes(theta_LS_prior), fill = "lightgreen", alpha = 0.3) +
+  geom_vline(xintercept = 0.3, linetype = "dashed", color = "red") +
+  labs(title = "Posterior vs Prior for theta_LS",
+       x = "theta_LS",
+       y = "Density") +
+  theme_minimal()
+
+```
+Plot 1: theta_WS (Win-Stay Probability)
+Green Area: Represents the prior distribution for theta_WS. It’s relatively flat, suggesting a weakly informative prior.
+Blue Area: Represents the posterior distribution for theta_WS after observing the data.
+Red Dashed Line: Indicates the true value used for simulation (0.8).
+
+Interpretation:
+
+The posterior distribution is shifted right compared to the prior, showing that the data strongly updates our beliefs.
+The posterior peak is slightly right of the true value, suggesting a bit of overestimation.
+Since the posterior is much more concentrated than the prior, it indicates that the data provides a lot of information about theta_WS.
+
+Plot 2: theta_LS (Lose-Shift Probability)
+Green Area: Represents the prior distribution for theta_LS, which is also fairly flat.
+Red Area: Represents the posterior distribution for theta_LS.
+Red Dashed Line: Indicates the true value used for simulation (0.3).
+Interpretation:
+
+The posterior for theta_LS is shifted left relative to the true value, suggesting underestimation.
+A significant portion of the posterior mass is close to 0, indicating the model might struggle to estimate this parameter accurately.
+The posterior’s concentration suggests the data is informative but may indicate model misspecification or insufficient data for theta_LS.
+
+theta_WS looks reasonable but slightly overestimated. The data strongly updates the prior.
+theta_LS appears underestimated with a left-skewed posterior, suggesting potential issues with:
+Model specification: Maybe the model structure doesn’t fit the data well.
+Prior choice: The prior might be too weak, allowing the posterior to shift too far left.
+Insufficient data: Increasing trial count might help.
+
+##Playing with bayesplot
+
+References
+https://mc-stan.org/bayesplot/
+https://mc-stan.org/bayesplot/reference/MCMC-distributions.html
+
+```{r}
+
+# Convert to array for bayesplot
+draws <- as_draws_array(samples$draws())
+mcmc_dens_overlay(draws, pars = c("theta_WS", "theta_LS")) +
+  ggtitle("Overlay of Prior and Posterior Densities")
+
+# Density plot for `theta_WS`
+mcmc_dens_overlay(draws, pars = "theta_WS") +
+  ggtitle("Density Plot for theta_WS") +
+  theme_minimal()
+
+# Density plot for `theta_LS`
+mcmc_dens_overlay(draws, pars = "theta_LS") +
+  ggtitle("Density Plot for theta_LS") +
+  theme_minimal()
+
+# Optional: Density plot for `beta` if it exists
+if ("beta" %in% dimnames(draws)$variable) {
+  mcmc_dens_overlay(draws, pars = "beta") +
+    ggtitle("Density Plot for Beta") +
+    theme_minimal()
+}
+
+
+
+```
+
+#Playing with Code - code taken from references for bayesplot. Still trying to understand.
+```{r}
+
+color_scheme_set("brightblue")  # Set default color scheme
+
+# Extract MCMC samples and convert to a format suitable for bayesplot
+draws <- as_draws_array(samples$draws())
+
+#####################
+### Histograms ###
+#####################
+
+# Histograms of all parameters
+mcmc_hist(draws, pars = c("theta_WS", "theta_LS", "beta")) +
+  ggtitle("Histograms of Parameters") +
+  theme_minimal()
+
+# Histograms of individual parameters with custom colors
+color_scheme_set("pink")
+mcmc_hist(draws, pars = "theta_WS") +
+  ggtitle("Histogram of theta_WS") +
+  theme_minimal()
+
+mcmc_hist(draws, pars = "theta_LS") +
+  ggtitle("Histogram of theta_LS") +
+  theme_minimal()
+
+mcmc_hist(draws, pars = "beta") +
+  ggtitle("Histogram of beta") +
+  theme_minimal()
+
+######################
+### Densities ###
+######################
+
+# Density plots for specific parameters
+mcmc_dens(draws, pars = c("theta_WS", "theta_LS", "beta"),
+          facet_args = list(nrow = 3)) +
+  ggtitle("Density Plots of Parameters") +
+  theme_minimal()
+
+# Overlay density plots for different chains
+color_scheme_set("mix-teal-pink")
+mcmc_dens_overlay(draws, pars = c("theta_WS", "theta_LS", "beta"),
+                  facet_args = list(nrow = 3)) +
+  ggtitle("Overlay Density Plots by Chain") +
+  theme_minimal()
+
+##############################
+### Densities by Chain ###
+##############################
+
+mcmc_dens_chains(draws, pars = c("theta_WS", "theta_LS", "beta")) +
+  ggtitle("Density Plots by Chain for Parameters") +
+  theme_minimal()
+
+#############################
+### Violin Plots ###
+#############################
+
+color_scheme_set("green")
+mcmc_violin(draws, pars = c("theta_WS", "theta_LS", "beta")) +
+  ggtitle("Violin Plots of Parameter Distributions") +
+  panel_bg(color = "gray20", size = 2, fill = "gray30") +
+  theme_minimal()
+
+```
+
+##Playing with Riccardo's code on the memory model 
+I dont really understand it, I'm playing with it.
+
+```{r}
+# Ensure draws_df has necessary parameters
+# Extract posterior samples explicitly
+draws_df <- as_draws_df(samples$draws()) %>%
+  select(theta_WS, theta_LS, beta) %>%  # Adjust based on your parameter names
+  mutate(
+    bias = theta_WS,       # Assuming theta_WS represents bias
+    beta = ifelse("beta" %in% colnames(.), beta, 0),  # Handle missing beta
+    bias_prior = rbeta(nrow(.), 1, 1),  # Prior for bias (adjust as needed)
+    beta_prior = rnorm(nrow(.), 0, 0.5) # Prior for beta (adjust as needed)
+  )
+
+# Check if beta exists
+if ("beta" %in% colnames(draws_df)) {
+
+  # Calculate predicted probabilities for each draw and memory level
+  predicted_probs <- draws_df %>%
+    mutate(
+      prob_low = plogis(bias + beta * qlogis(0.2)),  # Using plogis for logistic
+      prob_mid = plogis(bias + beta * qlogis(0.5)),
+      prob_high = plogis(bias + beta * qlogis(0.8))
+    ) %>%
+    pivot_longer(
+      cols = starts_with("prob_"),
+      names_to = "memory_level",
+      values_to = "probability"
+    ) %>%
+    mutate(
+      memory_value = case_when(
+        memory_level == "prob_low" ~ 0.2,
+        memory_level == "prob_mid" ~ 0.5,
+        memory_level == "prob_high" ~ 0.8
+      )
+    )
+
+  # Do the same for prior predictions
+  prior_probs <- draws_df %>%
+    mutate(
+      prob_low = plogis(bias_prior + beta_prior * qlogis(0.2)),
+      prob_mid = plogis(bias_prior + beta_prior * qlogis(0.5)),
+      prob_high = plogis(bias_prior + beta_prior * qlogis(0.8))
+    ) %>%
+    pivot_longer(
+      cols = starts_with("prob_"),
+      names_to = "memory_level",
+      values_to = "probability"
+    ) %>%
+    mutate(
+      memory_value = case_when(
+        memory_level == "prob_low" ~ 0.2,
+        memory_level == "prob_mid" ~ 0.5,
+        memory_level == "prob_high" ~ 0.8
+      )
+    )
+
+  # Density plot visualsation
+  p1 <- ggplot() +
+    geom_density(data = prior_probs, aes(x = probability, fill = "Prior"), alpha = 0.3) +
+    geom_density(data = predicted_probs, aes(x = probability, fill = "Posterior"), alpha = 0.3) +
+    facet_wrap(~memory_value, labeller = labeller(memory_value = c(
+      "0.2" = "Low Memory (20% Right)",
+      "0.5" = "Neutral Memory (50% Right)",
+      "0.8" = "High Memory (80% Right)"
+    ))) +
+    scale_fill_manual(values = c("Prior" = "red", "Posterior" = "blue"), name = "Distribution") +
+    labs(title = "Distribution of Predicted Probabilities at Different Memory Levels",
+         x = "Probability of Choosing Right",
+         y = "Density") +
+    theme_minimal()
+
+  # Violin plot visualisation
+  p2 <- ggplot() +
+    geom_violin(data = prior_probs, aes(x = factor(memory_value), y = probability, fill = "Prior"),
+                alpha = 0.3, position = position_dodge(width = 0.5)) +
+    geom_violin(data = predicted_probs, aes(x = factor(memory_value), y = probability, fill = "Posterior"),
+                alpha = 0.3, position = position_dodge(width = 0.5)) +
+    scale_fill_manual(values = c("Prior" = "red", "Posterior" = "blue"), name = "Distribution") +
+    scale_x_discrete(labels = c("Low\n(20% Right)", "Neutral\n(50% Right)", "High\n(80% Right)")) +
+    labs(title = "Distribution of Predicted Probabilities by Memory Level",
+         x = "Memory Level",
+         y = "Probability of Choosing Right") +
+    theme_minimal()
+
+  # Display both plots
+  p1 / p2
+
+} else {
+  print("No beta parameter found in the data.")
+}
+
+```
+Interpretation:
+Red (Prior): The distribution is wider and flatter, indicating a more uncertain belief about the probability of choosing “Right” before seeing the data.
+Blue (Posterior): The distribution is sharper and more concentrated, indicating the model’s updated belief after incorporating data.
+Neutral Memory (50% Right): The sharp spike suggests the model has learned a very specific probability for this condition.
+Low and High Memory: The posterior is much narrower than the prior, showing the model has learned effectively from the data.
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
