@@ -14,7 +14,9 @@ knitr::opts_chunk$set(echo = TRUE)
 pacman::p_load(tidyverse, here, posterior, cmdstanr, brms, tidybayes, rstan, ggplot2, dplyr)
 ```
 
-# Simulation functions 
+# FUNCTIONS 
+
+##  Agent Functions 
 ```{r}
 # probabilistic win-stay lose-shift model (with noise)
 WSLS_asym_noise <- function(prev_choice, feedback, WS_weight, LS_weight, noise){
@@ -46,51 +48,67 @@ random_agent <- function(rate){
 } 
 ```
 
+## Simulation Function
+The simulation function simulates a game of MPG between a random hider and a asymmetric probabilistic WSLS guesser
+```{r}
+sim_MPG <- function(n, # number of trials 
+                    random_rate, # rate for random hider
+                    WS_weight, # rate for staying when winning for WSLS
+                    LS_weight, # rate for shifting when losing for WSLS
+                    noise_wsls){  # noise in WSLS
+  
+  random_hider <- list(choice = rep(NA, n)) #empty list of choices made by hider
+  for (i in 1:n){
+    random_hider$choice[i] <- random_agent(random_rate)
+  }
+  wsls_guesser <- list(choice = rep(NA, n), #empty list of choices made by guesser
+                      feedback = rep(NA, n)) #empty list for feedback for guesser
+
+  for(i in 1:n){
+    if(i == 1){
+      wsls_guesser$choice[i] <- random_agent(0.5) #random first choice 
+    }
+    if(i>1){
+      if(wsls_guesser$choice[i-1] == random_hider$choice[i-1]){
+        wsls_guesser$feedback[i-1] <- 1
+      }
+      else{
+        wsls_guesser$feedback[i-1] <- 0
+      }
+      wsls_guesser$choice[i] <- WSLS_asym_noise(wsls_guesser$choice[i-1], 
+                                                wsls_guesser$feedback[i-1], 
+                                                WS_weight, LS_weight, noise_wsls)
+    }
+    if(i == n){
+      if(wsls_guesser$choice[n] == random_hider$choice[n]){
+        wsls_guesser$feedback[n] <- 1
+      }
+      else{
+        wsls_guesser$feedback[n] <- 0
+      }
+    }
+  }
+  #combine data for model into list
+  data <- list(n = n, choice = wsls_guesser$choice, feedback =  wsls_guesser$feedback)
+  return(data)
+}
+```
+
+```{r}
+MPD <- function(x) {
+  density(x)$x[which(density(x)$y==max(density(x)$y))]
+}
+```
+
+
 # SIMULATE DATA 
 ```{r}
-n <- 120 #number of trials 
-
-## simulate choices by random agent (as hider)
-rate <- 0.5 #bias for random agent 
-random_hider <- list(choice = rep(NA, n)) #empty list of choices made by hider
-for (i in 1:n){
-  random_hider$choice[i] <- random_agent(rate)
-}
-
-## simulate choices made by wsls (as guesser) based on the random agent 
-WS_weight <- 0.9 # probability of staying when winning
-LS_weight <- 0.6 # probability of shifting when losing
-noise <- 0 #no noise added 
-wsls_guesser <- list(choice = rep(NA, n), #empty list of choices made by guesser
-                     feedback = rep(NA, n)) #empty list for feedback for guesser
-
-for(i in 1:n){
-  if(i == 1){
-    wsls_guesser$choice[i] <- random_agent(0.5) #random first choice 
-  }
-  if(i>1){
-    if(wsls_guesser$choice[i-1] == random_hider$choice[i-1]){
-      wsls_guesser$feedback[i-1] <- 1
-    }
-    else{
-      wsls_guesser$feedback[i-1] <- 0
-    }
-    wsls_guesser$choice[i] <- WSLS_asym_noise(wsls_guesser$choice[i-1], 
-                                              wsls_guesser$feedback[i-1], 
-                                              WS_weight, LS_weight, noise)
-  }
-  if(i == n){
-    if(wsls_guesser$choice[n] == random_hider$choice[n]){
-      wsls_guesser$feedback[n] <- 1
-    }
-    else{
-      wsls_guesser$feedback[n] <- 0
-    }
-  }
-}
-
-#combine data for model into list
-data <- list(n = n, choice = wsls_guesser$choice, feedback =  wsls_guesser$feedback)
+n <-  120
+random_rate <- 0.5
+WS_weight <- 0.9 
+LS_weight <- 0.6 
+noise <- 0
+data <- sim_MPG(n, random_rate, WS_weight, LS_weight, noise)
 ```
 
 
@@ -163,11 +181,9 @@ generated quantities{
   theta_LS_posterior = inv_logit(theta_LS); 
 }
 "
-
 write_stan_file(
   stan_model, dir = "stan/", basename = "WSLSasym.stan")
 ```
-
 
 # COMPILE MODEL 
 ```{r}
@@ -190,7 +206,9 @@ samples <- mod$sample(
 samples$summary()
 ```
 
-# PLOT PRIOR-POSTERIOR UPDATE CHECKS 
+# PLOT MODEL QUALITY CHECKS
+
+## PRIOR-POSTERIOR UPDATE CHECKS 
 ```{r}
 draws_df <- as_draws_df(samples$draws())
 ggplot(draws_df) +
@@ -214,4 +232,130 @@ ggplot(draws_df) +
 ggsave("figs/prior_post_update_thetaLS.png")
 ```
 
+
+## MARKOV CHAINS
+```{r}
+ggplot(draws_df, aes(.iteration, theta_WS, group = .chain, color = .chain)) +
+  geom_line() +
+  ggtitle("THETA WIN-STAY")+
+  theme_classic()
+
+ggplot(draws_df, aes(.iteration, theta_LS, group = .chain, color = .chain)) +
+  geom_line() +
+  ggtitle("THETA LOSE-SHIFT")+
+  theme_classic()
+```
+
+# PARAMETER RECOVERY
+
+## Simulate Data with different theta values
+theta_WS are bounded between 0.5 (so it mostly stays) and 0.9 (no extreme values)
+theta_LS are bounded between 0.1 (no extreme values) and 0.5 (so it mostly shifts)
+
+```{r}
+nruns <- 100
+true_theta <- list(true_theta_WS = rep(NA, nruns), 
+                   true_theta_LS = rep(NA, nruns))
+data_list <- vector("list", nruns)
+
+for(i in 1:nruns){
+  true_theta$true_theta_WS[i] <- runif(1, min = 0.5, max = 0.99)
+  true_theta$true_theta_LS[i] <- runif(1, min = 0.01, max = 0.5)
+  data <- sim_MPG(n = 120, 
+                  random_rate = 0.5, 
+                  WS_weight = true_theta$true_theta_WS[i] , 
+                  LS_weight = true_theta$true_theta_LS[i] , 
+                  noise_wsls = 0)
+  data_list[[i]] <- data
+}
+```
+
+## Fit the model to each run of the simulated data
+```{r}
+recovery_df <- NULL
+
+for(i in 1:nruns){
+  data <- data_list[[i]]
+  
+  samples <- mod$sample(
+    data = data,
+    seed = 123,
+    refresh = 500,
+    chains = 2,
+    parallel_chains = 2,
+    threads_per_chain = 2,
+    iter_warmup = 1000,
+    iter_sampling = 2000,
+    max_treedepth = 20,
+    adapt_delta = 0.99
+  )
+  
+  draws_df <- as_draws_df(samples$draws()) 
+  
+  temp <- tibble(# true theta values 
+                 true_theta_WS = true_theta$true_theta_WS[i],
+                 true_theta_LS = true_theta$true_theta_LS[i],
+                 # estimated theta values
+                 est_theta_WS = draws_df$theta_WS_posterior, 
+                 est_theta_LS = draws_df$theta_LS_posterior, 
+                 # maximum posterior densities for theta values
+                 est_theta_WS_mpd = MPD(draws_df$theta_WS_posterior), 
+                 est_theta_LS_mpd = MPD(draws_df$theta_LS_posterior))
+  
+  if(exists("recovery_df")){
+    recovery_df <- rbind(recovery_df, temp)
+  } 
+  else{
+    recovery_df <- temp
+  }
+
+}
+save(recovery_df, file = "RData/recovery_estimates.RData")
+```
+## Load saved recovery data
+```{r}
+load("RData/recovery_estimates.RData")
+```
+
+## Plot Recovery: Full range of estimated values 
+```{r}
+ggplot(recovery_df, aes(true_theta_WS, est_theta_WS)) +
+  geom_point(alpha = 0.1) +
+  geom_smooth() +
+  ggtitle("Parameter Recovery: THETA WIN-STAY")+
+  theme_classic()
+ggsave("figs/recovery_theta_WS.png")
+
+  
+ggplot(recovery_df, aes(true_theta_LS, est_theta_LS)) +
+  geom_point(alpha = 0.1) +
+  geom_smooth() +
+  ggtitle("Parameter Recovery: THETA LOSE-SHIFT")+
+  theme_classic()
+ggsave("figs/recovery_theta_LS.png")
+
+```
+
+
+## Plot Recovery: Maximum Posterior Density
+```{r}
+
+ggplot(recovery_df, aes(true_theta_WS, est_theta_WS_mpd)) +
+  geom_point(alpha = 0.1) +
+  xlim(0.5,1) + ylim(0.5,1)+
+  geom_abline(aes(slope = 1, intercept = 0, colour = "red"), show.legend = F)+
+  ggtitle("Parameter Recovery (MPD): THETA WIN-STAY")+
+  theme_classic()
+ggsave("figs/recovery_theta_WS_mpd.png")
+
+  
+ggplot(recovery_df, aes(true_theta_LS, est_theta_LS_mpd)) +
+  geom_point(alpha = 0.1) +
+  xlim(0,0.5) + ylim(0,0.5)+
+  geom_abline(aes(slope = 1, intercept = 0, colour = "red"), show.legend = F)+
+  ggtitle("Parameter Recovery (MPD): THETA LOSE-SHIFT")+
+  theme_classic()
+ggsave("figs/recovery_theta_LS_mpd.png")
+
+```
 
