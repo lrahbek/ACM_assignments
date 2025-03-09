@@ -461,28 +461,28 @@ recovery_df %>%
 ggsave("figs/recovery_theta_LS_mpd.png")
 
 ```
+
 ## Plot: Recovery per number of trials
-
 ```{r}
- 
-ggplot(recovery_df, aes(true_theta_LS, est_theta_LS_mpd)) +
+p1 <- ggplot(recovery_df, aes(true_theta_LS, est_theta_LS_mpd)) +
   geom_point(alpha = 0.1) +
+  xlim(0.5,1) + ylim(0.3,1)+
   geom_abline(aes(slope = 1, intercept = 0, colour = "red"), show.legend = F)+
-  ggtitle("Parameter Recovery: THETA LOSE-SHIFT")+
-  facet_wrap(~n, labeller = label_both)+
+  ggtitle("Parameter Recovery: theta lose-shift")+
+  facet_wrap(~n, labeller = label_both, nrow = 1)+
   theme_minimal()
-ggsave("figs/recovery_theta_LS_trials.png")
 
-
-ggplot(recovery_df, aes(true_theta_WS, est_theta_WS_mpd)) +
+p2 <- ggplot(recovery_df, aes(true_theta_WS, est_theta_WS_mpd)) +
   geom_point(alpha = 0.1) +
-  #xlim(0,1) + ylim(0,1)+
+  xlim(0.5,1) + ylim(0.3,1)+
   geom_abline(aes(slope = 1, intercept = 0, colour = "red"), show.legend = F)+
-  ggtitle("Parameter Recovery: THETA WIN-STAY")+
-  facet_wrap(~n, labeller = label_both)+
+  ggtitle("Parameter Recovery: theta win-stay")+
+  facet_wrap(~n, labeller = label_both, nrow = 1)+
   theme_minimal()
-ggsave("figs/recovery_theta_WS_trials.png")
 
+p1+p2 + plot_layout(nrow = 2)
+
+ggsave("figs/recovery_theta_WS_&_LS_trials.png", width = 10, height = 7)
 ```
 
 
