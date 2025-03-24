@@ -23,6 +23,10 @@ The project structure is as follows:
     ├── stan/
     ├── README.md
     └── assignment2.R           # The main markdown for assignment 2
+├── assignment3/
+    ├── figs/
+    ├── README.md
+    └── .... .R
 ├── .gitignore
 └── README.md
 
