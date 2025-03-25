@@ -12,12 +12,13 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r}
 pacman::p_load(tidyverse, here, posterior, cmdstanr, brms, tidybayes, rstan, 
                ggplot2, dplyr, patchwork)
+
 ```
 
 
 # FUNCTIONS
 ## Function for simulating first and group rating for one agent for given amount
-of simuli (trials)
+of stimuli (trials)
 ```{r}
 simulating_ratings <- function(n_stim, max_rating){
   
@@ -27,14 +28,15 @@ simulating_ratings <- function(n_stim, max_rating){
   for (i in 1:n_stim){
     # simulating the first rating based on a randomly sampled probability value
     prob <- runif(1, min = 0.001, max = 0.999) 
-    ratings$first_rating[i] <- rbinom(1, (max_rating-1), prob) + 1
+    ratings$first_rating[i] <- rbinom(1, (max_rating), prob) #rbinom(1,(max_rating-1),prob)+1
     
     # simulating the group rating, based on the value of the first rating 
-    feedback <- (sample.int((max_rating-1), 1)-4)
-    group_rating <- ratings$first_rating[i]+(feedback)
-    ratings$group_rating[i] <- ifelse(group_rating<1, 1, 
-                                      ifelse(group_rating>max_rating, max_rating,
+    feedback <- (sample.int((max_rating), 1) - 4) # (sample.int((max_rating - 1), 1) - 4)
+    group_rating <- ratings$first_rating[i] + (feedback)
+    ratings$group_rating[i] <- ifelse(group_rating < 0, 0, 
+                                      ifelse(group_rating > max_rating, max_rating,
                                              group_rating))
+    
     #obs: feedback is constrained to not go outside the bounds of rating scale 
     #(0-8). we should do it in another way because this way creates uneven dist
     #of feedback values (below 0 is changed to 0 and above 8 is changed to 8, 
@@ -60,10 +62,10 @@ betaBinomialModel <- function(alpha_prior, beta_prior, first_ratings, group_rati
     neg_group_rating <- max_rating - group_ratings[i] #
     
     #calculate weighted information 
-    first_rating_w <- first_ratings[i]*weight_first
-    group_rating_w <- group_ratings[i]*weight_group
-    neg_first_rating_w <- neg_first_rating*weight_first
-    neg_group_rating_w <- neg_group_rating*weight_group
+    first_rating_w <- first_ratings[i] * weight_first
+    group_rating_w <- group_ratings[i] * weight_group
+    neg_first_rating_w <- neg_first_rating * weight_first
+    neg_group_rating_w <- neg_group_rating * weight_group
   
     # calculate posterior beta and alpha values
     ratings2$alpha_post[i] <- alpha_prior + first_rating_w + group_rating_w
@@ -73,7 +75,7 @@ betaBinomialModel <- function(alpha_prior, beta_prior, first_ratings, group_rati
     ratings2$expected_rate[i] <- ratings2$alpha_post[i] /(
                                         ratings2$alpha_post[i] + ratings2$beta_post[i])  
 
-    ratings2$second_rating[i] <- rbinom(1, 7, ratings2$expected_rate[i]) + 1
+    ratings2$second_rating[i] <- rbinom(1, 7, ratings2$expected_rate[i]) #+1
   }
   return(ratings2)
 }
@@ -85,7 +87,7 @@ betaBinomialModel <- function(alpha_prior, beta_prior, first_ratings, group_rati
 ## Simple (non weighted) simulation
 ```{r}
 n_stim <- 153 # number of stimuli (faces)
-max_rating <- 8 # maximum possible rating
+max_rating <- 7 # maximum possible rating
 n_agents <- 10 # number of agents
 
 ratings_all <- vector("list", n_agents) #list for first and group rating for all agents 
@@ -105,7 +107,7 @@ for (a in 1:n_agents){
 #save data in STAN type of list 
 data_simple <- list(n_stim = 153, 
                     n_agents = 10, 
-                    max_rating = 8,
+                    max_rating = 7,
                     second_rating = matrix(unlist(do.call(rbind, second_ratings_all)[ 
                       ,"second_rating"]), byrow = T, ncol = n_agents),
                     first_rating = matrix(unlist(do.call(rbind, ratings_all)[ 
@@ -114,3 +116,125 @@ data_simple <- list(n_stim = 153,
                       ,"group_rating"]), byrow = T, ncol = n_agents))
 
 ```
+
+
+# STAN MODEL of the simple agent model
+```{r}
+stan_model_simple <- "
+
+data {
+  int <lower=1> n_stim;
+  int <lower=1> n_agents;
+  int <lower=1> max_rating;
+  array[n_stim, n_agents] int <lower=0, upper=7> first_rating;
+  array[n_stim, n_agents] int <lower=0, upper=7> second_rating;
+  array[n_stim, n_agents] int <lower=0, upper=7> group_rating;
+}
+
+parameters{
+  real alpha_prior;
+  real beta_prior;
+}
+
+model {
+  for (i in 1:n_agents) {
+    for (j in 1:n_stim) {
+      
+      real alpha_post = alpha_prior + first_rating[j, i] + group_rating[j, i];
+      real beta_post = beta_prior + (max_rating - first_rating[j, i]) + (max_rating - group_rating[j, i]);
+      
+      // model the second rating
+      target += beta_binomial_lpmf(second_rating[j, i] | 7, alpha_post, beta_post);
+    }
+  }
+}
+generated quantities {
+
+  array[n_stim, n_agents] real log_lik;
+  
+  array[n_stim, n_agents] int prior_pred_rating;
+  array[n_stim, n_agents] int post_pred_rating;
+
+  for (i in 1:n_agents) {
+    for (j in 1:n_stim) {
+      
+      prior_pred_rating[j, i] = beta_binomial_rng(7, 1, 1);
+      
+      real alpha_post = alpha_prior + first_rating[j, i] + group_rating[j, i];
+      real beta_post = beta_prior+(max_rating - first_rating[j, i]) + (max_rating - group_rating[j, i]);
+      
+      post_pred_rating[j, i] = beta_binomial_rng(7, alpha_post, beta_post);
+      
+      log_lik[j, i] = beta_binomial_lpmf(second_rating[j, i] | 7, alpha_post, beta_post);
+    }
+  }
+}
+"
+
+write_stan_file(
+  stan_model_simple, dir = "stan/", basename = "simple_agent.stan")
+
+```
+
+# COMPILE MODEL 
+```{r}
+file <- file.path("stan/simple_agent.stan")
+mod <- cmdstan_model(file, cpp_options = list(stan_threads = TRUE))
+
+samples_simple <- mod$sample(
+  data = data_simple,
+  seed = 120,
+  refresh = 500,
+  chains = 2,
+  parallel_chains = 2,
+  threads_per_chain = 2,
+  iter_warmup = 1000,
+  iter_sampling = 2000,
+  max_treedepth = 20,
+  adapt_delta = 0.99
+)
+
+```
+
+```{r}
+samples_simple$summary('prior_pred_rating') # prior_pred_rating, post_pred_rating
+
+draws_df_simple <- as_draws_df(samples_simple$draws())
+draws_df_simple
+```
+
+
+# STAN MODEL of the weighted agent model
+```{r}
+stan_model_weighted <- "
+
+data {
+  int <lower=1> n_stim;
+  int <lower=1> n_agents;
+  int <lower=1> max_rating;
+  array[n_stim, n_agents] int <lower=0, upper=7> first_rating;
+  array[n_stim, n_agents] int <lower=0, upper=7> second_rating;
+  array[n_stim, n_agents] int <lower=0, upper=7> group_rating;
+}
+
+parameters{
+  real weight
+  
+}
+
+model {
+ 
+}
+generated quantities {
+
+}
+"
+
+write_stan_file(
+  stan_model_weighted, dir = "stan/", basename = "weighted_agent.stan")
+
+```
+
+
+
+
