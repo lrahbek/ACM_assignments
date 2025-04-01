@@ -46,11 +46,12 @@ simulating_ratings <- function(n_stim, max_rating){
 }
 ```
 
-## Beta Binomial Agent, simulating second_rating
+## Beta Binomial Agent - simple model
+Simulating second_rating!
 IWeight parameters are included in the  function, if none weighted agent weights = 1.
 ```{r}
-betaBinomialModel <- function(alpha_prior, beta_prior, first_ratings, group_ratings, 
-                              max_rating, n_stim, weight_first, weight_group) {
+betaBinomialModel_simple <- function(alpha_prior, beta_prior, first_ratings, group_ratings, 
+                                      max_rating, n_stim, weight_first, weight_group) {
   #list of values 
   ratings2 <- list(second_rating = rep(NA, n_stim), 
                    expected_rate = rep(NA, n_stim), 
@@ -74,13 +75,51 @@ betaBinomialModel <- function(alpha_prior, beta_prior, first_ratings, group_rati
     # calculated second rating based on first and group rating
     ratings2$expected_rate[i] <- ratings2$alpha_post[i] /(
                                         ratings2$alpha_post[i] + ratings2$beta_post[i])  
-
     ratings2$second_rating[i] <- rbinom(1, 7, ratings2$expected_rate[i]) #+1
   }
   return(ratings2)
 }
 ```
 
+## Beta Binomial Agent - weighted model
+```{r}
+betaBinomialModel_weighted <- function(alpha_prior, beta_prior, first_ratings, group_ratings, 
+                                        max_rating, n_stim, total_weight, weight_proportion) {
+  #list of values 
+  ratings2 <- list(second_rating = rep(NA, n_stim), 
+                   expected_rate = rep(NA, n_stim), 
+                   alpha_post = rep(NA, n_stim), 
+                   beta_post = rep(NA, n_stim), 
+                   total_weight = total_weight, 
+                   weight_proportion = weight_proportion)
+  
+  weight_first <- total_weight * weight_proportion
+  weight_group <- total_weight * (1 - weight_proportion)
+  
+  #for each stimuli: 
+  for (i in 1:n_stim){
+    neg_first_rating <- max_rating - first_ratings[i]
+    neg_group_rating <- max_rating - group_ratings[i]
+    
+    #calculate weighted information 
+    first_rating_w <- first_ratings[i] * weight_first
+    group_rating_w <- group_ratings[i] * weight_group
+    neg_first_rating_w <- neg_first_rating * weight_first
+    neg_group_rating_w <- neg_group_rating * weight_group
+  
+    # calculate posterior beta and alpha values
+    ratings2$alpha_post[i] <- alpha_prior + first_rating_w + group_rating_w
+    ratings2$beta_post[i] <- beta_prior + neg_first_rating_w + neg_group_rating_w      
+    
+    # calculated second rating based on first and group rating
+    ratings2$expected_rate[i] <- ratings2$alpha_post[i] /(
+                                        ratings2$alpha_post[i] + ratings2$beta_post[i])  
+    ratings2$second_rating[i] <- rbinom(1, 7, ratings2$expected_rate[i]) #+1
+  }
+  return(ratings2)
+}
+
+```
 
 
 # SIMULATE DATA
@@ -97,7 +136,7 @@ second_ratings_all <- vector("list", n_agents) #list for second rating for all a
 for (a in 1:n_agents){
   ratings_all[[a]] <-  simulating_ratings(n_stim, max_rating) #simulate first and group ratings
   
-  second_ratings_all[[a]] <- betaBinomialModel(alpha_prior = 1, beta_prior = 1,
+  second_ratings_all[[a]] <- betaBinomialModel_simple(alpha_prior = 1, beta_prior = 1,
                                                first_rating = ratings_all[[a]]$first_rating, 
                                                group_rating = ratings_all[[a]]$group_rating,
                                                max_rating, n_stim, 
@@ -115,6 +154,69 @@ data_simple <- list(n_stim = 153,
                     group_rating =  matrix(unlist(do.call(rbind, ratings_all)[ 
                       ,"group_rating"]), byrow = T, ncol = n_agents))
 
+```
+
+## Weighted simulation
+```{r}
+n_stim <- 153 # number of stimuli (faces)
+n_populations <- 1 # number of populations
+max_rating <- 7 # maximum possible rating
+n_agents <- 100 # number of agents
+
+ratings_all <- vector("list", n_agents) #list for first and group rating for all agents 
+second_ratings_all <- vector("list", n_agents) #list for second rating for all agents 
+
+weight <- list(total_weight_mu = rep(NA, n_populations), 
+               total_weight_sigma = rep(NA, n_populations), 
+               weight_proportion_mu = rep(NA, n_populations),
+               weight_proportion_sigma = rep(NA, n_populations))
+
+# loop through the population
+for (p in 1:n_populations){
+  
+  total_weight_mu <- 10
+  total_weight_sigma <- 2
+  
+  weight_proportion_mu <- 0.8
+  weight_proportion_sigma <- 0.1
+  
+  #loop through each agent
+  for (a in 1:n_agents){
+    
+    total_weight <- rnorm(1, mean = total_weight_mu, sd = total_weight_sigma)
+    weight_proportion <- rnorm(1, mean = weight_proportion_mu, sd = weight_proportion_sigma)
+    
+    ratings_all[[a]] <-  simulating_ratings(n_stim, max_rating) #simulate first and group ratings
+    
+    second_ratings_all[[a]] <- betaBinomialModel_weighted(alpha_prior = 1, beta_prior = 1,
+                                                 first_rating = ratings_all[[a]]$first_rating, 
+                                                 group_rating = ratings_all[[a]]$group_rating,
+                                                 max_rating, n_stim, 
+                                                 total_weight = total_weight, 
+                                                 weight_proportion = weight_proportion)
+  }
+  weight$total_weight_mu[p] <- total_weight_mu
+  weight$total_weight_sigma[p] <- total_weight_sigma
+  weight$weight_proportion_mu[p] <- weight_proportion_mu
+  weight$weight_proportion_sigma[p] <- weight_proportion_sigma
+}
+
+#save data in STAN type of list 
+data_weighted <- list(n_stim = 153, 
+                    n_agents = 100, 
+                    n_populations = 1,
+                    max_rating = 7,
+                    second_rating = matrix(unlist(do.call(rbind, second_ratings_all)[ 
+                      ,"second_rating"]), byrow = T, ncol = n_agents),
+                    first_rating = matrix(unlist(do.call(rbind, ratings_all)[ 
+                      ,"first_rating"]), byrow = T, ncol = n_agents), 
+                    group_rating =  matrix(unlist(do.call(rbind, ratings_all)[ 
+                      ,"group_rating"]), byrow = T, ncol = n_agents))
+```
+
+
+```{r}
+hist(second_ratings_all)
 ```
 
 
@@ -210,6 +312,7 @@ stan_model_weighted <- "
 
 data {
   int <lower=1> n_stim;
+  int <lower=1> n_populations;
   int <lower=1> n_agents;
   int <lower=1> max_rating;
   array[n_stim, n_agents] int <lower=0, upper=7> first_rating;
@@ -218,13 +321,38 @@ data {
 }
 
 parameters{
-  real weight
+  array[n_agents] real total_weight;
+  array[n_agents] real weight_proportion;
   
+  real total_weight_mu;
+  real total_weight_sigma;
+  real <lower=0, upper=1> weight_proportion_mu;
+  real weight_proportion_sigma;
+}
+
+trasnformed parameters {
+  real<lower=0> weight_first = total_weight * weight_proportion;
+  real<lower=0> weight_group = total_weight * (1 - weight_proportion);
 }
 
 model {
- 
+  // priors
+  target += lognormal_lpdf(total_weight | )
+  target += beta_lpdf(weight_proportion | )
+  
+
+  for (i in 1:n_agents) {
+    for (j in 1:n_stim) {
+      
+      real alpha_post = alpha_prior + first_rating[j, i] + group_rating[j, i];
+      real beta_post = beta_prior + (max_rating - first_rating[j, i]) + (max_rating - group_rating[j, i]);
+      
+      // model the second rating
+      target += beta_binomial_lpmf(second_rating[j, i] | 7, alpha_post, beta_post);
+    }
+  }
 }
+
 generated quantities {
 
 }
