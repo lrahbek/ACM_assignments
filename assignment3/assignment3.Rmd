@@ -230,8 +230,6 @@ data_weighted <- list(n_stim = n_stim,
                       second_rating = second_rating_w,
                       first_rating = first_rating_w, 
                       group_rating = group_rating_w)
-
-
 ```
 
 
@@ -339,46 +337,132 @@ data {
 }
 
 parameters{
-  array[n_agents] real total_weight;
-  array[n_agents] real weight_proportion;
+  // commented alpha and beta priors out and hardcoding instead bc the model
+  // part is not icluding them
+  //real mu_alpha_prior;                   // Population mean for alpha prior
+  //real<lower=0> sigma_alpha_prior;       // Population SD for alpha prior
+  //real mu_beta_prior;                    // Population mean for beta prior
+  //real<lower=0> sigma_beta_prior;        // Population SD for beta prior
   
-  real total_weight_mu;
-  real total_weight_sigma;
-  real <lower=0, upper=1> weight_proportion_mu;
-  real weight_proportion_sigma;
+  //priors
+  // agent level params
+  array[n_populations, n_agents] real scaling_weight;
+  array[n_populations, n_agents] real weight_ratio;
+  
+  // population level params
+  array[n_populations] real scaling_weight_mu;
+  array[n_populations] real <lower=0> scaling_weight_sigma;
+  array[n_populations] real weight_ratio_mu;
+  array[n_populations] real <lower=0> weight_ratio_sigma;
+  
+  // Individual-level (random) effects
+  array[n_populations, n_agents] z_weight_ratio;              
+  array[n_populations, n_agents] z_scaling;                   
 }
 
 trasnformed parameters {
-  real<lower=0> weight_first = total_weight * weight_proportion;
-  real<lower=0> weight_group = total_weight * (1 - weight_proportion);
+  // Individual-level parameters
+  array[n_populations, n_agents] <lower=0> weight_ratio;  
+  array[n_populations, n_agents] <lower=0> scaling_factor;     
+  array[n_populations, n_agents] <lower=0> weight_first;     
+  array[n_populations, n_agents] <lower=0> weight_group;      
+  
+  
+  // Non-centered parameterization
+  for (p in 1:n_populations){
+    
+    for (i in 1:n_agents){
+      weight_ratio[p, i] = exp(weight_ratio_mu + z_weight_ratio[p, i] * scaling_weight_sigma);
+      scaling_factor[p, i] = exp(scaling_weight_mu + z_scaling[p, i] * scaling_weight_sigma);
+      
+      weight_first[p, i] = scaling_factor[p, i] * weight_ratio[p, i] / (1 + weight_ratio[p, i]);
+      weight_group[p, i] = scaling_factor[p, i]  / (1 + weight_ratio[p, i]);
+      
+    }
+  }
 }
 
 model {
-  // priors
-  target += lognormal_lpdf(total_weight | )
-  target += beta_lpdf(weight_proportion | )
+  // Priors for population parameters
+  weight_ratio_mu ~ normal(0, 1);        // Prior for log weight ratio centered at 0 (equal weights)
+  scaling_weight_mu ~ normal(0, 1);      // Prior for log scaling factor
   
-
-  for (i in 1:n_agents) {
-    for (j in 1:n_stim) {
+  weight_ratio_sigma ~ exponential(2);   // Prior for between-subject variability
+  scaling_weight_sigma ~ exponential(2);        // Prior for scaling variability
+  
+  // Priors for individual random effects
+  z_weight_ratio ~ std_normal();         // Standard normal prior for weight ratio z-scores
+  z_scaling ~ std_normal();              // Standard normal prior for scaling z-scores
+  
+  
+  // Likelihood
+  for (p in 1:n_populations){
+    for (i in 1:n_agents){
+      real w_first = weight_first[p, i];
+      real w_group = weight_group[p, i];
       
-      real alpha_post = alpha_prior + first_rating[j, i] + group_rating[j, i];
-      real beta_post = beta_prior + (max_rating - first_rating[j, i]) + (max_rating - group_rating[j, i]);
-      
-      // model the second rating
-      target += beta_binomial_lpmf(second_rating[j, i] | 7, alpha_post, beta_post);
+      for (j in 1:n_stim){
+        // calculate weighted information 
+        real first_rating_w = first_ratings[p, i, j] * w_first;
+        group_rating_w = group_ratings[p, i, j] * w_group;
+        
+        neg_first_rating_w = (max_rating - first_ratings[p, i, j]) * w_first;
+        neg_group_rating_w = (max_rating - group_ratings[p, i, j]) * w_group;
+        
+        real alpha_post = 1 + first_rating_w + group_rating_w;
+        real beta_post = 1 + neg_first_rating_w + neg_group_rating_w;
+        
+        target += beta_binomial_lpmf(second_rating[p, i, j] | 7, alpha_post, beta_post);
+        
+      }
     }
   }
 }
 
 generated quantities {
-
+  
+   // Convert population parameters to original weight scale for interpretation
+  real population_ratio = exp(weight_ratio_mu);
+  real population_scaling = exp(scaling_weight_mu);
+  real population_weight_first = population_scaling * population_ratio / (1 + population_ratio);
+  real population_weight_group = population_scaling / (1 + population_ratio);
+  
+  // Log likelihood for model comparison
+  array[n_populations, n_agents, n_stim] log_lik;
+  
+  // Population and individual predictions
+  array[n_populations, n_agents, n_stim] int pred_choice;
+  
+  
+  for (p in 1:n_populations){
+    for (i in 1:n_agents){
+      real w_first = weight_first[p, i];
+      real w_group = weight_group[p, i];
+      
+      for (j in 1:n_stim){
+        // calculate weighted information 
+        real first_rating_w = first_ratings[p, i, j] * w_first;
+        group_rating_w = group_ratings[p, i, j] * w_group;
+        
+        neg_first_rating_w = (max_rating - first_ratings[p, i, j]) * w_first;
+        neg_group_rating_w = (max_rating - group_ratings[p, i, j]) * w_group;
+        
+        real alpha_post = 1 + first_rating_w + group_rating_w;
+        real beta_post = 1 + neg_first_rating_w + neg_group_rating_w;
+        
+        // Generate predictions using beta-binomial
+        pred_choice[p, i, j] = beta_binomial_rng(1, alpha_post, beta_post);
+        
+        // Calculate log likelihood
+        log_lik[p, i, j] = beta_binomial_lpmf(second_rating[p, i, j] | 7, alpha_post, beta_post);        
+      }
+    }
+  }
 }
 "
 
 write_stan_file(
   stan_model_weighted, dir = "stan/", basename = "weighted_agent.stan")
-
 ```
 
 
