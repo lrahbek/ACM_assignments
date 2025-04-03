@@ -25,7 +25,7 @@ feedback_fun <- function(first_rating){
   feedback_lim <- feedback_vals[feedback_vals+first_rating>-1 & feedback_vals+first_rating<8] # possible feedback for current given first_rating (avoding group ratings below 0 and above 7)
   feedback <- sample(feedback_lim, 1)
   group_rating <- first_rating + (feedback)
-  return(list(group_rating = group_rating, feedback = feedback))
+  return(group_rating)
 }
 ```
 
