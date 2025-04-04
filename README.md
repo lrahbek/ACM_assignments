@@ -26,7 +26,7 @@ The project structure is as follows:
 ├── assignment3/
     ├── figs/
     ├── README.md
-    └── .... .R
+    └── assignment3.R           # The main markdown for assignment 3
 ├── .gitignore
 └── README.md
 
