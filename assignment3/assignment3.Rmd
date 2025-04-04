@@ -34,14 +34,12 @@ feedback_fun <- function(first_rating){
 Simulates ratings for one agent for given amount of stimuli (trials)
 ```{r}
 simulating_ratings <- function(n_stim, max_rating){
-  
   ratings <- list(first_rating = rep(NA, n_stim), 
                   group_rating = rep(NA, n_stim))
   for (i in 1:n_stim){
     # simulating the first rating based on a randomly sampled probability value
     prob <- runif(1, min = 0.001, max = 0.999) 
     ratings$first_rating[i] <- rbinom(1, max_rating, prob) #rbinom(1,(max_rating-1),prob)+1
-    
     # simulating the group rating, based on the value of the first rating
     ratings$group_rating[i] <- feedback_fun(ratings$first_rating[i])
   }
@@ -63,11 +61,9 @@ betaBinomialModel_simple <- function(alpha_prior, beta_prior, first_ratings,
   for (i in 1:n_stim){
     neg_first_rating <- max_rating - first_ratings[i] #the 'points' not given 
     neg_group_rating <- max_rating - group_ratings[i] #
-  
     # calculate posterior beta and alpha values
     ratings2$alpha_post[i] <- alpha_prior + first_ratings[i] + group_ratings[i]
     ratings2$beta_post[i] <- beta_prior + neg_first_rating + neg_group_rating    
-    
     # calculated second rating based on first and group rating
     ratings2$expected_rate[i] <- ratings2$alpha_post[i] /(
                                         ratings2$alpha_post[i] + ratings2$beta_post[i])  
@@ -79,36 +75,31 @@ betaBinomialModel_simple <- function(alpha_prior, beta_prior, first_ratings,
 
 ## Beta Binomial Agent - weighted model
 ```{r}
-betaBinomialModel_weighted <- function(alpha_prior, beta_prior, first_ratings, group_ratings, 
-                                       max_rating, n_stim, scaling_factor, weight_ratio) {
+betaBinomialModel_weighted <- function(alpha_prior, beta_prior, first_ratings,
+                                       group_ratings, max_rating, n_stim, 
+                                       scaling_factor, weight_ratio) {
   #list of values 
   ratings2 <- list(second_rating = rep(NA, n_stim), 
                    expected_rate = rep(NA, n_stim), 
                    alpha_post = rep(NA, n_stim), 
                    beta_post = rep(NA, n_stim))
-  
   weight_first <- scaling_factor * weight_ratio / (1+ weight_ratio)
   weight_group <- scaling_factor / (1 + weight_ratio)
-
   #for each stimuli: 
   for (i in 1:n_stim){
     neg_first_rating <- max_rating - first_ratings[i]
     neg_group_rating <- max_rating - group_ratings[i]
-    
     #calculate weighted information 
     first_rating_w <- first_ratings[i] * weight_first
     group_rating_w <- group_ratings[i] * weight_group
     neg_first_rating_w <- neg_first_rating * weight_first
     neg_group_rating_w <- neg_group_rating * weight_group
-  
     # calculate posterior beta and alpha values
     ratings2$alpha_post[i] <- alpha_prior + first_rating_w + group_rating_w
     ratings2$beta_post[i] <- beta_prior + neg_first_rating_w + neg_group_rating_w      
-    
     # calculated second rating based on first and group rating
     ratings2$expected_rate[i] <- ratings2$alpha_post[i] /(
                                         ratings2$alpha_post[i] + ratings2$beta_post[i])  
-    
     ratings2$second_rating[i] <- rbinom(1, 7, ratings2$expected_rate[i]) #+1
   }
   return(ratings2)
@@ -118,46 +109,57 @@ betaBinomialModel_weighted <- function(alpha_prior, beta_prior, first_ratings, g
 
 
 # SIMULATE DATA
-
+Simulate data for both simple and weighted model
 ## Parameters for both models
 ```{r}
 n_stim <- 153 # number of stimuli (faces)
 max_rating <- 7 # maximum possible rating
-n_agents <- 100 # number of agents
+n_agents <- 40 # number of agents
+n_populations <- 1 # number of populations
 ```
 
 
 ## Simple (non weighted) simulation
 ```{r}
-ratings_all <- vector("list", n_agents) #list for first and group rating for all agents 
-second_ratings_all <- vector("list", n_agents) #list for second rating for all agents 
+# Arrays for first and group ratings 
+first_rating_s <- array(NA, dim = c(n_agents, n_stim))
+group_rating_s <- array(NA, dim = c(n_agents, n_stim))
+
+# Arrays for second rating, expected rate, alpha and beta posteriors
+second_rating_s <- array(NA, dim = c(n_agents, n_stim))
+expected_rate_s <- array(NA, dim = c(n_agents, n_stim))
+alpha_post_s <- array(NA, dim = c(n_agents, n_stim))
+beta_post_s <- array(NA, dim = c(n_agents, n_stim))
 
 #loop through each agent
 for (a in 1:n_agents){
-  ratings_all[[a]] <-  simulating_ratings(n_stim, max_rating) #simulate first and group ratings
-  
-  second_ratings_all[[a]] <- betaBinomialModel_simple(alpha_prior = 1, beta_prior = 1,
-                                               first_rating = ratings_all[[a]]$first_rating, 
-                                               group_rating = ratings_all[[a]]$group_rating,
-                                               max_rating, n_stim)
+  ratings <-  simulating_ratings(n_stim, max_rating) 
+  first_rating_s[a,] <- ratings$first_rating
+  group_rating_s[a,] <- ratings$group_rating
+    
+  second_ratings <- betaBinomialModel_simple(alpha_prior = 1, beta_prior = 1,
+                                             first_rating = first_rating_s[a,],
+                                             group_rating = group_rating_s[a,],
+                                             max_rating, n_stim)
+  second_rating_s[a, ] <- second_ratings$second_rating
+  expected_rate_s[a,] <- second_ratings$expected_rate
+  alpha_post_s[a,] <- second_ratings$alpha_post
+  beta_post_s[a,]<- second_ratings$beta_post
 }
 
 #save data in STAN type of list 
 data_simple <- list(n_stim = n_stim, 
                     n_agents = n_agents, 
                     max_rating = max_rating,
-                    second_rating = matrix(unlist(do.call(rbind, second_ratings_all)[ 
-                      ,"second_rating"]), byrow = T, ncol = n_agents),
-                    first_rating = matrix(unlist(do.call(rbind, ratings_all)[ 
-                      ,"first_rating"]), byrow = T, ncol = n_agents), 
-                    group_rating =  matrix(unlist(do.call(rbind, ratings_all)[ 
-                      ,"group_rating"]), byrow = T, ncol = n_agents))
+                    second_rating = second_rating_s,
+                    first_rating = first_rating_s, 
+                    group_rating = group_rating_s)
+rm(first_rating_s, second_rating_s, group_rating_s, expected_rate_s, 
+   alpha_post_s, beta_post_s, second_ratings, ratings) # clean up
 ```
 
 ## Weighted simulation
 ```{r}
-n_populations <- 2 # number of populations
-
 # Arrays for first and group ratings 
 first_rating_w <- array(NA, dim = c(n_populations, n_agents, n_stim))
 group_rating_w <- array(NA, dim = c(n_populations, n_agents, n_stim))
@@ -180,14 +182,15 @@ weight <- list(scaling_weight_mu = rep(NA, n_populations),
                weight_ratio_mu = rep(NA, n_populations),
                weight_ratio_sigma = rep(NA, n_populations))
 
+
 # loop through the population
 for (p in 1:n_populations){
   
   # Define population parameters for weighted model
-  scaling_weight_mu <- 1.5   # Mean scaling factor (log-scale)
-  scaling_weight_sigma <- 0.3     # SD of scaling factor (log-scale)
-  weight_ratio_mu <- 1     # Mean weight ratio (log-scale, 0 = equal weights)
-  weight_ratio_sigma <- 0.5       # SD of weight ratio (log-scale)
+  scaling_weight_mu <- 1.5   # Mean scaling factor (log-scale) exp(1.5) = 4.48
+  scaling_weight_sigma <- 0.3     # SD of scaling factor (log-scale) exp(0.3) = 1.34
+  weight_ratio_mu <- 1     # Mean weight ratio (log-scale, 0 = equal weights) exp(1) = 2.72
+  weight_ratio_sigma <- 0.5       # SD of weight ratio (log-scale) exp(0.5) = 1.65
   
   #loop through each agent
   for (a in 1:n_agents){
@@ -230,96 +233,68 @@ data_weighted <- list(n_stim = n_stim,
                       second_rating = second_rating_w,
                       first_rating = first_rating_w, 
                       group_rating = group_rating_w)
+
+rm(first_rating_w, second_rating_w, group_rating_w, expected_rate_w, 
+   alpha_post_w, beta_post_w, second_ratings, ratings, weight_ratio_mu, 
+   weight_ratio_sigma, scaling_weight_mu, scaling_weight_sigma) # clean up
 ```
 
 
 
-# STAN MODELS 
 
-## STAN MODEL of the simple agent model
+# STAN MODELS 
+## STAN MODEL of the simple agent
 ```{r}
 stan_model_simple <- "
-
 data {
   int <lower=1> n_stim;
   int <lower=1> n_agents;
   int <lower=1> max_rating;
-  array[n_stim, n_agents] int <lower=0, upper=7> first_rating;
-  array[n_stim, n_agents] int <lower=0, upper=7> second_rating;
-  array[n_stim, n_agents] int <lower=0, upper=7> group_rating;
+  array[n_agents, n_stim] int <lower=0, upper=7> first_rating;
+  array[n_agents, n_stim] int <lower=0, upper=7> second_rating;
+  array[n_agents, n_stim] int <lower=0, upper=7> group_rating;
 }
-
 parameters{
-  real alpha_prior;
-  real beta_prior;
+  real <lower=0> alpha_prior;
+  real <lower=0> beta_prior;
 }
-
 model {
+
   for (i in 1:n_agents) {
     for (j in 1:n_stim) {
-      
-      real alpha_post = alpha_prior + first_rating[j, i] + group_rating[j, i];
-      real beta_post = beta_prior + (max_rating - first_rating[j, i]) + (max_rating - group_rating[j, i]);
+      real alpha_post = alpha_prior + first_rating[i, j] + group_rating[i, j];
+      real beta_post = beta_prior + (max_rating - first_rating[i, j]) + (max_rating - group_rating[i, j]);
       
       // model the second rating
-      target += beta_binomial_lpmf(second_rating[j, i] | 7, alpha_post, beta_post);
+      target += beta_binomial_lpmf(second_rating[i, j] | 7, alpha_post, beta_post);
     }
   }
 }
 generated quantities {
 
-  array[n_stim, n_agents] real log_lik;
-  
-  array[n_stim, n_agents] int prior_pred_rating;
-  array[n_stim, n_agents] int post_pred_rating;
+  array[n_agents, n_stim] real log_lik;
+  array[n_agents, n_stim] int prior_pred_rating;
+  array[n_agents, n_stim] int post_pred_rating;
 
   for (i in 1:n_agents) {
     for (j in 1:n_stim) {
       
-      prior_pred_rating[j, i] = beta_binomial_rng(7, 1, 1);
+      prior_pred_rating[i, j] = beta_binomial_rng(7, 1, 1);
       
-      real alpha_post = alpha_prior + first_rating[j, i] + group_rating[j, i];
-      real beta_post = beta_prior+(max_rating - first_rating[j, i]) + (max_rating - group_rating[j, i]);
+      real alpha_post = alpha_prior + first_rating[i, j] + group_rating[i, j];
+      real beta_post = beta_prior+(max_rating - first_rating[i, j]) + (max_rating - group_rating[i, j]);
       
-      post_pred_rating[j, i] = beta_binomial_rng(7, alpha_post, beta_post);
+      post_pred_rating[i, j] = beta_binomial_rng(7, alpha_post, beta_post);
       
-      log_lik[j, i] = beta_binomial_lpmf(second_rating[j, i] | 7, alpha_post, beta_post);
+      log_lik[i, j] = beta_binomial_lpmf(second_rating[i, j] | 7, alpha_post, beta_post);
     }
   }
 }
 "
 write_stan_file(
   stan_model_simple, dir = "stan/", basename = "simple_agent.stan")
+rm(stan_model_simple) #clean up
 ```
-
-### COMPILE MODEL 
-```{r}
-file <- file.path("stan/simple_agent.stan")
-mod <- cmdstan_model(file, cpp_options = list(stan_threads = TRUE))
-
-samples_simple <- mod$sample(
-  data = data_simple,
-  seed = 120,
-  refresh = 500,
-  chains = 2,
-  parallel_chains = 2,
-  threads_per_chain = 2,
-  iter_warmup = 1000,
-  iter_sampling = 2000,
-  max_treedepth = 20,
-  adapt_delta = 0.99
-)
-samples_simple$summary()
-draws_df <- as_draws_df(samples_simple$draws())
-```
-
-```{r}
-samples_simple$summary('prior_pred_rating') # prior_pred_rating, post_pred_rating
-
-draws_df_simple <- as_draws_df(samples_simple$draws())
-draws_df_simple
-```
-
 
 ## STAN MODEL of the weighted agent model
 ```{r}
@@ -335,9 +310,9 @@ data {
 }
 parameters {
   // population level params
-  array[n_populations] real scaling_weight_mu;
-  array[n_populations] real <lower=0> scaling_weight_sigma;
-  array[n_populations] real weight_ratio_mu;
+  array[n_populations] real <lower=-6, upper=10> scaling_mu;
+  array[n_populations] real <lower=0> scaling_sigma;
+  array[n_populations] real <lower=-6, upper=6> weight_ratio_mu;
   array[n_populations] real <lower=0> weight_ratio_sigma;
   
   // Individual-level (random) effects
@@ -354,8 +329,8 @@ transformed parameters {
   // Non-centered parameterization
   for (p in 1:n_populations){
     for (i in 1:n_agents){
-      weight_ratio[p, i] = exp(weight_ratio_mu[p] + z_weight_ratio[p, i] * scaling_weight_sigma[p]);
-      scaling_factor[p, i] = exp(scaling_weight_mu[p] + z_scaling[p, i] * scaling_weight_sigma[p]);
+      weight_ratio[p, i] = exp(weight_ratio_mu[p] + z_weight_ratio[p, i] * weight_ratio_sigma[p]);
+      scaling_factor[p, i] = exp(scaling_mu[p] + z_scaling[p, i] * scaling_sigma[p]);
       
       weight_first[p, i] = scaling_factor[p, i] * weight_ratio[p, i] / (1 + weight_ratio[p, i]);
       weight_group[p, i] = scaling_factor[p, i]  / (1 + weight_ratio[p, i]);
@@ -363,13 +338,12 @@ transformed parameters {
   }
 }
 model {
-  // priors 
   for (p in 1:n_populations){
     // Population level priors 
     target += normal_lpdf(weight_ratio_mu[p] | 0, 1);
-    target += normal_lpdf(scaling_weight_mu[p] | 0, 1);
+    target += normal_lpdf(scaling_mu[p] | 0, 1);
     target += exponential_lpdf(weight_ratio_sigma[p] | 2);        
-    target += exponential_lpdf(scaling_weight_sigma[p] | 2);    
+    target += exponential_lpdf(scaling_sigma[p] | 2);    
     
     for (i in 1:n_agents){
       // Agent level priors 
@@ -384,7 +358,6 @@ model {
       real w_group = weight_group[p, i];
       
       for (j in 1:n_stim){
-        // calculate weighted information 
         real first_rating_w = first_rating[p, i, j] * w_first;
         real group_rating_w = group_rating[p, i, j] * w_group;
         
@@ -401,22 +374,18 @@ model {
 }
 generated quantities {
   
-  // Convert population parameters to original weight scale for interpretation
+  // Arrays for converted population parameters 
   array[n_populations] real population_ratio;
   array[n_populations] real population_scaling;
   array[n_populations] real population_weight_first;
   array[n_populations] real population_weight_group;
 
-  // Log likelihood for model comparison
-  array[n_populations, n_agents, n_stim] real log_lik;
-  
-  // Population and individual predictions
-  array[n_populations, n_agents, n_stim] int pred_choice;
+  array[n_populations, n_agents, n_stim] real log_lik;  // Log likelihood for model comparison
+  array[n_populations, n_agents, n_stim] int pred_second_rating; // Population and individual predictions
   
   for (p in 1:n_populations){
-    // moved from beginning of gen. quan
     population_ratio[p] = exp(weight_ratio_mu[p]);
-    population_scaling[p] = exp(scaling_weight_mu[p]);
+    population_scaling[p] = exp(scaling_mu[p]);
     population_weight_first[p] = population_scaling[p] * population_ratio[p] / (1 + population_ratio[p]);
     population_weight_group[p] = population_scaling[p] / (1 + population_ratio[p]);
   
@@ -428,15 +397,13 @@ generated quantities {
         // calculate weighted information 
         real first_rating_w = first_rating[p, i, j] * w_first;
         real group_rating_w = group_rating[p, i, j] * w_group;
-        
         real neg_first_rating_w = (max_rating - first_rating[p, i, j]) * w_first;
         real neg_group_rating_w = (max_rating - group_rating[p, i, j]) * w_group;
-        
         real alpha_post = 1 + first_rating_w + group_rating_w;
         real beta_post = 1 + neg_first_rating_w + neg_group_rating_w;
         
         // Generate predictions using beta-binomial
-        pred_choice[p, i, j] = beta_binomial_rng(1, alpha_post, beta_post);
+        pred_second_rating[p, i, j] = beta_binomial_rng(7, alpha_post, beta_post);
         
         // Calculate log likelihood
         log_lik[p, i, j] = beta_binomial_lpmf(second_rating[p, i, j] | 7, alpha_post, beta_post);        
@@ -447,15 +414,42 @@ generated quantities {
 "
 write_stan_file(
   stan_model_weighted, dir = "stan/", basename = "weighted_agent.stan")
+rm(stan_model_weighted) #clean up
 ```
 
 
 
+# COMPILE AND FIT MODELS: SIMULATED DATA
+## Compile and fit simple model
 ```{r}
-file <- file.path("stan/weighted_agent.stan")
-mod <- cmdstan_model(file, cpp_options = list(stan_threads = TRUE))
+file_simple <- file.path("stan/simple_agent.stan")
+mod_simple <- cmdstan_model(file_simple, 
+                            cpp_options = list(stan_threads = TRUE))
 
-samples_weighted <- mod$sample(
+samples_simple <- mod_simple$sample(
+  data = data_simple,
+  seed = 120,
+  refresh = 500,
+  chains = 2,
+  parallel_chains = 2,
+  threads_per_chain = 2,
+  iter_warmup = 1000,
+  iter_sampling = 2000,
+  max_treedepth = 20,
+  adapt_delta = 0.99
+)
+
+simple_sum <- samples_simple$summary()
+draws_df_simple <- as_draws_df(samples_simple$draws())
+```
+
+## Compile and fit weighted model
+```{r}
+file_weighted <- file.path("stan/weighted_agent.stan")
+mod_weighted <- cmdstan_model(file_weighted, 
+                              cpp_options = list(stan_threads = TRUE))
+
+samples_weighted <- mod_weighted$sample(
   data = data_weighted,
   seed = 120,
   refresh = 500,
@@ -467,149 +461,107 @@ samples_weighted <- mod$sample(
   max_treedepth = 20,
   adapt_delta = 0.99
 )
-samples_weighted$summary()
-draws_df <- as_draws_df(samples_weighted$draws())
+weighted_sum <- samples_weighted$summary()
+draws_df_weighted <- as_draws_df(samples_weighted$draws())
 ```
 
-
-### old version STAN weigted
+## Convergence checks for simple and weighted models 
 ```{r}
-stan_model_weighted <- "
+simple_rhat_issues <- simple_sum %>%
+  filter(rhat > 1.05) %>% nrow()
+cat("Simple model parameters with Rhat > 1.05:", 
+    simple_rhat_issues, "out of", nrow(simple_sum), "\n")
 
-data {
-  int <lower=1> n_stim;
-  int <lower=1> n_populations;
-  int <lower=1> n_agents;
-  int <lower=1> max_rating;
-  array[n_populations, n_agents, n_stim] int <lower=0, upper=7> first_rating;
-  array[n_populations, n_agents, n_stim] int <lower=0, upper=7> second_rating;
-  array[n_populations, n_agents, n_stim] int <lower=0, upper=7> group_rating;
-}
-
-parameters{
-  // commented alpha and beta priors out and hardcoding instead bc the model
-  // part is not icluding them
-  //real mu_alpha_prior;                   // Population mean for alpha prior
-  //real<lower=0> sigma_alpha_prior;       // Population SD for alpha prior
-  //real mu_beta_prior;                    // Population mean for beta prior
-  //real<lower=0> sigma_beta_prior;        // Population SD for beta prior
-  
-  //priors
-  // agent level params
-  array[n_populations, n_agents] real scaling_weight;
-  array[n_populations, n_agents] real weight_ratio;
-  
-  // population level params
-  array[n_populations] real scaling_weight_mu;
-  array[n_populations] real <lower=0> scaling_weight_sigma;
-  array[n_populations] real weight_ratio_mu;
-  array[n_populations] real <lower=0> weight_ratio_sigma;
-  
-  // Individual-level (random) effects
-  array[n_populations, n_agents] z_weight_ratio;              
-  array[n_populations, n_agents] z_scaling;                   
-}
-
-trasnformed parameters {
-  // Individual-level parameters
-  array[n_populations, n_agents] <lower=0> weight_ratio;  
-  array[n_populations, n_agents] <lower=0> scaling_factor;     
-  array[n_populations, n_agents] <lower=0> weight_first;     
-  array[n_populations, n_agents] <lower=0> weight_group;      
-  
-  
-  // Non-centered parameterization
-  for (p in 1:n_populations){
-    
-    for (i in 1:n_agents){
-      weight_ratio[p, i] = exp(weight_ratio_mu + z_weight_ratio[p, i] * scaling_weight_sigma);
-      scaling_factor[p, i] = exp(scaling_weight_mu + z_scaling[p, i] * scaling_weight_sigma);
-      
-      weight_first[p, i] = scaling_factor[p, i] * weight_ratio[p, i] / (1 + weight_ratio[p, i]);
-      weight_group[p, i] = scaling_factor[p, i]  / (1 + weight_ratio[p, i]);
-      
-    }
-  }
-}
-
-model {
-  // Priors for population parameters
-  weight_ratio_mu ~ normal(0, 1);        // Prior for log weight ratio centered at 0 (equal weights)
-  scaling_weight_mu ~ normal(0, 1);      // Prior for log scaling factor
-  
-  weight_ratio_sigma ~ exponential(2);   // Prior for between-subject variability
-  scaling_weight_sigma ~ exponential(2);        // Prior for scaling variability
-  
-  // Priors for individual random effects
-  z_weight_ratio ~ std_normal();         // Standard normal prior for weight ratio z-scores
-  z_scaling ~ std_normal();              // Standard normal prior for scaling z-scores
-  
-  
-  // Likelihood
-  for (p in 1:n_populations){
-    for (i in 1:n_agents){
-      real w_first = weight_first[p, i];
-      real w_group = weight_group[p, i];
-      
-      for (j in 1:n_stim){
-        // calculate weighted information 
-        real first_rating_w = first_ratings[p, i, j] * w_first;
-        group_rating_w = group_ratings[p, i, j] * w_group;
-        
-        neg_first_rating_w = (max_rating - first_ratings[p, i, j]) * w_first;
-        neg_group_rating_w = (max_rating - group_ratings[p, i, j]) * w_group;
-        
-        real alpha_post = 1 + first_rating_w + group_rating_w;
-        real beta_post = 1 + neg_first_rating_w + neg_group_rating_w;
-        
-        target += beta_binomial_lpmf(second_rating[p, i, j] | 7, alpha_post, beta_post);
-        
-      }
-    }
-  }
-}
-
-generated quantities {
-  
-   // Convert population parameters to original weight scale for interpretation
-  real population_ratio = exp(weight_ratio_mu);
-  real population_scaling = exp(scaling_weight_mu);
-  real population_weight_first = population_scaling * population_ratio / (1 + population_ratio);
-  real population_weight_group = population_scaling / (1 + population_ratio);
-  
-  // Log likelihood for model comparison
-  array[n_populations, n_agents, n_stim] log_lik;
-  
-  // Population and individual predictions
-  array[n_populations, n_agents, n_stim] int pred_choice;
-  
-  
-  for (p in 1:n_populations){
-    for (i in 1:n_agents){
-      real w_first = weight_first[p, i];
-      real w_group = weight_group[p, i];
-      
-      for (j in 1:n_stim){
-        // calculate weighted information 
-        real first_rating_w = first_ratings[p, i, j] * w_first;
-        group_rating_w = group_ratings[p, i, j] * w_group;
-        
-        neg_first_rating_w = (max_rating - first_ratings[p, i, j]) * w_first;
-        neg_group_rating_w = (max_rating - group_ratings[p, i, j]) * w_group;
-        
-        real alpha_post = 1 + first_rating_w + group_rating_w;
-        real beta_post = 1 + neg_first_rating_w + neg_group_rating_w;
-        
-        // Generate predictions using beta-binomial
-        pred_choice[p, i, j] = beta_binomial_rng(1, alpha_post, beta_post);
-        
-        // Calculate log likelihood
-        log_lik[p, i, j] = beta_binomial_lpmf(second_rating[p, i, j] | 7, alpha_post, beta_post);        
-      }
-    }
-  }
-}
-"
+weighted_rhat_issues <- weighted_sum %>%
+  filter(rhat > 1.05) %>% nrow()
+cat("Simple model parameters with Rhat > 1.05:", 
+    weighted_rhat_issues, "out of", nrow(weighted_sum), "\n")
 ```
+
+# FIT MODELS: REAL DATA
+
+## Load data and format to list
+(as the weighted model is multilevel, and the simple model isnt (i.e. one has 3D arrays and one hasnt), two different data versions are made)
+```{r}
+# Load data
+data <- read_csv("data/Simonsen_clean.csv", show_col_types = F,
+         col_select = c("ID", "FaceID",
+                        "FirstRating", "GroupRating", "SecondRating"))
+# save data in STAN-friendly list 
+data_real <- list(n_stim = length(unique(data$FaceID)), 
+                  n_agents = length(unique(data$ID)), 
+                  max_rating = 7,
+                  second_rating = NA,
+                  first_rating = NA, 
+                  group_rating = NA)
+
+# make a data version for each of the models : simple
+data_real_simple <- data_real
+data_real_simple$second_rating <- array(data$SecondRating-1, 
+                                 dim = c(data_real$n_agents, data_real$n_stim))
+data_real_simple$first_rating <- array(data$FirstRating-1, 
+                                 dim = c(data_real$n_agents, data_real$n_stim))
+data_real_simple$group_rating <- array(data$GroupRating-1, 
+                                 dim = c(data_real$n_agents, data_real$n_stim))
+
+# make a data version for each of the models : weighted
+data_real_weighted <- data_real
+data_real_weighted$n_populations <- 1
+data_real_weighted$second_rating <- array(
+  data$SecondRating-1, dim = c(1, data_real$n_agents, data_real$n_stim))
+data_real_weighted$first_rating <- array(
+  data$FirstRating-1, dim = c(1, data_real$n_agents, data_real$n_stim))
+data_real_weighted$group_rating <- array(
+  data$GroupRating-1, dim = c(1, data_real$n_agents, data_real$n_stim))
+rm(data_real, data) #clean up
+```
+
+
+## Fit simple and weighted model to real data
+
+```{r}
+samples_simple_DR <- mod_simple$sample(
+  data = data_real_simple,
+  seed = 120,
+  refresh = 500,
+  chains = 2,
+  parallel_chains = 2,
+  threads_per_chain = 2,
+  iter_warmup = 1000,
+  iter_sampling = 2000,
+  max_treedepth = 20,
+  adapt_delta = 0.99
+)
+simple_sum_DR <- samples_simple_DR$summary()
+draws_simple_DR <- as_draws_df(samples_simple_DR$draws())
+```
+
+```{r}
+samples_weighted <- mod_weighted$sample(
+  data = data_real_weighted,
+  seed = 120,
+  refresh = 500,
+  chains = 2,
+  parallel_chains = 2,
+  threads_per_chain = 2,
+  iter_warmup = 1000,
+  iter_sampling = 2000,
+  max_treedepth = 20,
+  adapt_delta = 0.99
+)
+weighted_sum_DR <- samples_weighte_DRd$summary()
+draws_weighted_DR <- as_draws_df(samples_weighted_DR$draws())
+
+```
+
+
+# MODEL QUALITY CHECKS 
+
+
+# MODEL COMPARISON
+
+
+
+
 
 
