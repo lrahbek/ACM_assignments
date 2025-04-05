@@ -255,8 +255,8 @@ data {
   array[n_agents, n_stim] int <lower=0, upper=7> group_rating;
 }
 parameters{
-  real <lower=0> alpha_prior;
-  real <lower=0> beta_prior;
+  real <lower=0, upper=10> alpha_prior;
+  real <lower=0, upper=10> beta_prior;
 }
 model {
 
@@ -430,7 +430,7 @@ samples_simple <- mod_simple$sample(
   data = data_simple,
   seed = 120,
   refresh = 500,
-  chains = 2,
+  chains = 1, #2
   parallel_chains = 2,
   threads_per_chain = 2,
   iter_warmup = 1000,
@@ -438,10 +438,29 @@ samples_simple <- mod_simple$sample(
   max_treedepth = 20,
   adapt_delta = 0.99
 )
-
 simple_sum <- samples_simple$summary()
 draws_df_simple <- as_draws_df(samples_simple$draws())
 ```
+
+
+
+```{r}
+post_preds_s <- simple_sum[grepl("post_pred_rating", simple_sum$variable) == T,
+                         c("variable", "median")]
+
+post_preds_s$agent_id <- str_remove(str_split_i(post_preds_s$variable, ",", 1), "post_pred_rating\\[|")
+post_preds_s$face_id <- str_remove(str_split_i(post_preds_s$variable, ",", 2), "\\]")
+post_preds_s$median <- as.integer(post_preds_s$median)
+
+
+
+
+plot(array(post_preds_s$median, dim = c(40, 153)), 
+     (data_simple$second_rating))
+
+plot(density(abs(post_preds_s$median[post_preds_s$agent_id == 1] data_simple$second_rating[1,])))
+```
+
 
 ## Compile and fit weighted model
 ```{r}
@@ -453,7 +472,7 @@ samples_weighted <- mod_weighted$sample(
   data = data_weighted,
   seed = 120,
   refresh = 500,
-  chains = 2,
+  chains = 1,#2
   parallel_chains = 2,
   threads_per_chain = 2,
   iter_warmup = 1000,
@@ -467,6 +486,7 @@ draws_df_weighted <- as_draws_df(samples_weighted$draws())
 
 ## Convergence checks for simple and weighted models 
 ```{r}
+cat("Convergence checks for simple and weighted model \n")
 simple_rhat_issues <- simple_sum %>%
   filter(rhat > 1.05) %>% nrow()
 cat("Simple model parameters with Rhat > 1.05:", 
@@ -474,7 +494,7 @@ cat("Simple model parameters with Rhat > 1.05:",
 
 weighted_rhat_issues <- weighted_sum %>%
   filter(rhat > 1.05) %>% nrow()
-cat("Simple model parameters with Rhat > 1.05:", 
+cat("Weighted model parameters with Rhat > 1.05:", 
     weighted_rhat_issues, "out of", nrow(weighted_sum), "\n")
 ```
 
@@ -518,7 +538,6 @@ rm(data_real, data) #clean up
 
 
 ## Fit simple and weighted model to real data
-
 ```{r}
 samples_simple_DR <- mod_simple$sample(
   data = data_real_simple,
@@ -533,11 +552,12 @@ samples_simple_DR <- mod_simple$sample(
   adapt_delta = 0.99
 )
 simple_sum_DR <- samples_simple_DR$summary()
-draws_simple_DR <- as_draws_df(samples_simple_DR$draws())
+draws_simple_DR <- as_draws_df(samples_simple_DR$draws()) 
 ```
 
+
 ```{r}
-samples_weighted <- mod_weighted$sample(
+samples_weighted_DR <- mod_weighted$sample(
   data = data_real_weighted,
   seed = 120,
   refresh = 500,
@@ -549,16 +569,115 @@ samples_weighted <- mod_weighted$sample(
   max_treedepth = 20,
   adapt_delta = 0.99
 )
-weighted_sum_DR <- samples_weighte_DRd$summary()
+weighted_sum_DR <- samples_weighted_DR$summary()
 draws_weighted_DR <- as_draws_df(samples_weighted_DR$draws())
-
 ```
+## Convergence checks for simple and weighted models: REAL DATA
+```{r}
+cat("Convergence checks for simple and weighted model (fit to real data) \n")
+simple_rhat_issues_DR <- simple_sum_DR %>%
+  filter(rhat > 1.05) %>% nrow()
+cat("Simple model parameters with Rhat > 1.05:", 
+    simple_rhat_issues_DR, "out of", nrow(simple_sum), "\n")
+
+weighted_rhat_issues_DR <- weighted_sum_DR %>%
+  filter(rhat > 1.05) %>% nrow()
+cat("Weighted model parameters with Rhat > 1.05:", 
+    weighted_rhat_issues_DR, "out of", nrow(weighted_sum), "\n")
+```
+
 
 
 # MODEL QUALITY CHECKS 
 
 
 # MODEL COMPARISON
+
+## LOO-CV
+```{r}
+loo_simple <- samples_simple_DR$loo()
+loo_weighted <- samples_weighted_DR$loo()
+loo_comparison <- loo_compare(list(simple = loo_simple, weighted = loo_weighted))
+print(loo_comparison)
+```
+
+## Model Weights
+```{r}
+model_weights <- loo_model_weights(list(
+  "Simple Integration" = loo_simple,
+  "Weighted Integration" = loo_weighted))
+
+# Print model weights
+print(model_weights)
+```
+
+## Visualize model weights
+```{r}
+model_comp_data <- tibble(
+  model = names(model_weights),
+  weight = as.numeric(model_weights))
+
+p_model_comp <- ggplot(model_comp_data, aes(x = model, y = weight, fill = model)) +
+  geom_col() +
+  geom_text(aes(label = scales::percent(weight, accuracy = 0.1)), 
+            vjust = -0.5, size = 5) +
+  labs(title = "Model Comparison Using LOO-CV",
+       subtitle = "Higher weights indicate better predictive performance",
+       x = NULL, y = "Model Weight") +
+  scale_fill_brewer(palette = "Accent") +
+  theme_minimal() +   ylim(0,0.7)+
+  theme(legend.position = "none");p_model_comp
+```
+
+```{r}
+# Compare model performance by agent type
+# Calculate pointwise ELPD values for each model
+elpd_simple <- loo_simple$pointwise[, "elpd_loo"]
+elpd_weighted <- loo_weighted$pointwise[, "elpd_loo"]
+
+# Aggregate by agent
+elpd_by_agent <- multilevel_sim_data %>%
+  dplyr::select(agent_id, model_type) %>%
+  distinct() %>%
+  mutate(
+    elpd_simple = NA_real_,
+    elpd_weighted = NA_real_
+  )
+
+# Calculate ELPD sums by agent
+for (j in 1:nrow(elpd_by_agent)) {
+  agent <- elpd_by_agent$agent_id[j]
+  # Find rows for this agent
+  agent_rows <- which(multilevel_sim_data$agent_id == agent)
+  # Sum ELPD values for this agent
+  elpd_by_agent$elpd_simple[j] <- sum(elpd_simple[agent_rows])
+  elpd_by_agent$elpd_weighted[j] <- sum(elpd_weighted[agent_rows])
+}
+
+# Calculate ELPD difference (positive = weighted model is better)
+elpd_by_agent <- elpd_by_agent %>%
+  mutate(
+    elpd_diff = elpd_weighted - elpd_simple,
+    better_model = ifelse(elpd_diff > 0, "Weighted", "Simple")
+  )
+
+# Create visualization of model preference by agent type
+
+p_agent_comp <- ggplot(elpd_by_agent, aes(x = agent_id, y = elpd_diff, color = model_type)) +
+  geom_point() +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  labs(
+    title = "Model Preference by Agent Type",
+    subtitle = "Positive values favor the weighted model; negative values favor the simple model",
+    x = "True Agent Type",
+    y = "ELPD Difference (Weighted - Simple)",
+    color = "Preferred Model"
+  ) +
+  theme_minimal()
+
+
+print(p_agent_comp)
+```
 
 
 

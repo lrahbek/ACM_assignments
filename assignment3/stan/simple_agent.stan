@@ -8,8 +8,8 @@ data {
   array[n_agents, n_stim] int <lower=0, upper=7> group_rating;
 }
 parameters{
-  real <lower=0> alpha_prior;
-  real <lower=0> beta_prior;
+  real <lower=0, upper=10> alpha_prior;
+  real <lower=0, upper=10> beta_prior;
 }
 model {
 
