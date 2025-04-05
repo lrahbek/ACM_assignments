@@ -488,6 +488,7 @@ cat("Weighted model parameters with Rhat > 1.05:",
 data <- read_csv("data/Simonsen_clean.csv", show_col_types = F,
          col_select = c("ID", "FaceID",
                         "FirstRating", "GroupRating", "SecondRating"))
+
 # save data in STAN-friendly list 
 data_real <- list(n_stim = length(unique(data$FaceID)), 
                   n_agents = length(unique(data$ID)), 
@@ -514,7 +515,7 @@ data_real_weighted$first_rating <- array(
   data$FirstRating-1, dim = c(1, data_real$n_agents, data_real$n_stim))
 data_real_weighted$group_rating <- array(
   data$GroupRating-1, dim = c(1, data_real$n_agents, data_real$n_stim))
-rm(data_real, data) #clean up
+rm(data_real) #clean up
 ```
 
 
@@ -553,6 +554,8 @@ samples_weighted_DR <- mod_weighted$sample(
 weighted_sum_DR <- samples_weighted_DR$summary()
 draws_weighted_DR <- as_draws_df(samples_weighted_DR$draws())
 ```
+
+
 ## Convergence checks for simple and weighted models: REAL DATA
 ```{r}
 cat("Convergence checks for simple and weighted model (fit to real data) \n")
@@ -567,14 +570,25 @@ cat("Weighted model parameters with Rhat > 1.05:",
     weighted_rhat_issues_DR, "out of", nrow(weighted_sum), "\n")
 ```
 
+```{r}
+# Extract posterior samples for key parameters
+
+# From weighted model
+population_ratio_weighted <- mean(exp(draws_weighted_DR$`weight_ratio_mu[1]` ))
+population_scaling_weighted <- mean(exp(draws_weighted_DR$`scaling_mu[1]`))
+population_ratio_sigma_weighted <- mean(draws_weighted_DR$`weight_ratio_sigma[1]`)
+population_scaling_sigma_weighted <- mean(draws_weighted_DR$`scaling_sigma[1]`)
+
+```
+
+
 
 
 # MODEL QUALITY CHECKS 
 
 
 # MODEL COMPARISON
-
-## LOO-CV
+## Calculate: LOO-CV
 ```{r}
 loo_simple <- samples_simple_DR$loo()
 loo_weighted <- samples_weighted_DR$loo()
@@ -582,7 +596,7 @@ loo_comparison <- loo_compare(list(simple = loo_simple, weighted = loo_weighted)
 print(loo_comparison)
 ```
 
-## Model Weights
+## Calculate and Visualize model weights
 ```{r}
 model_weights <- loo_model_weights(list(
   "Simple Integration" = loo_simple,
@@ -592,72 +606,70 @@ model_weights <- loo_model_weights(list(
 print(model_weights)
 ```
 
-## Visualize model weights
+
 ```{r}
 model_comp_data <- tibble(
   model = names(model_weights),
   weight = as.numeric(model_weights))
 
-p_model_comp <- ggplot(model_comp_data, aes(x = model, y = weight, fill = model)) +
+ggplot(model_comp_data, aes(x = model, y = weight, fill = model)) +
   geom_col() +
   geom_text(aes(label = scales::percent(weight, accuracy = 0.1)), 
             vjust = -0.5, size = 5) +
   labs(title = "Model Comparison Using LOO-CV",
        subtitle = "Higher weights indicate better predictive performance",
        x = NULL, y = "Model Weight") +
-  scale_fill_brewer(palette = "Accent") +
+  scale_fill_viridis_d(begin = 0.1, end = 0.5)+
+  #scale_fill_brewer(palette = "Accent") +
   theme_minimal() +   ylim(0,0.7)+
-  theme(legend.position = "none");p_model_comp
+  theme(legend.position = "none")
+ggsave("figs/model_weights.png")
 ```
 
+
+
+## Compare Model for each Participant
 ```{r}
-# Compare model performance by agent type
 # Calculate pointwise ELPD values for each model
 elpd_simple <- loo_simple$pointwise[, "elpd_loo"]
 elpd_weighted <- loo_weighted$pointwise[, "elpd_loo"]
-
 # Aggregate by agent
-elpd_by_agent <- multilevel_sim_data %>%
-  dplyr::select(agent_id, model_type) %>%
-  distinct() %>%
-  mutate(
-    elpd_simple = NA_real_,
-    elpd_weighted = NA_real_
-  )
+elpd_by_agent <- data %>% 
+  select(ID) %>% 
+  distinct() %>% 
+  mutate(elpd_simple = NA_real_, elpd_weighted = NA_real_)
 
 # Calculate ELPD sums by agent
-for (j in 1:nrow(elpd_by_agent)) {
-  agent <- elpd_by_agent$agent_id[j]
+for (i in 1:nrow(elpd_by_agent)) {
+  agent <- elpd_by_agent$ID[i]
   # Find rows for this agent
-  agent_rows <- which(multilevel_sim_data$agent_id == agent)
+  agent_rows <- which(data$ID == agent)
   # Sum ELPD values for this agent
-  elpd_by_agent$elpd_simple[j] <- sum(elpd_simple[agent_rows])
-  elpd_by_agent$elpd_weighted[j] <- sum(elpd_weighted[agent_rows])
+  elpd_by_agent$elpd_simple[i] <- sum(elpd_simple[agent_rows])
+  elpd_by_agent$elpd_weighted[i] <- sum(elpd_weighted[agent_rows])
 }
-
 # Calculate ELPD difference (positive = weighted model is better)
 elpd_by_agent <- elpd_by_agent %>%
-  mutate(
-    elpd_diff = elpd_weighted - elpd_simple,
-    better_model = ifelse(elpd_diff > 0, "Weighted", "Simple")
-  )
+  mutate(elpd_diff = elpd_weighted - elpd_simple,
+         better_model = ifelse(elpd_diff > 0, "Weighted", "Simple"))
 
-# Create visualization of model preference by agent type
+```
 
-p_agent_comp <- ggplot(elpd_by_agent, aes(x = agent_id, y = elpd_diff, color = model_type)) +
+## Vizualisation
+```{r}
+ggplot(elpd_by_agent, aes(x = as.factor(ID), y = elpd_diff, color = elpd_diff)) +
   geom_point() +
   geom_hline(yintercept = 0, linetype = "dashed") +
-  labs(
-    title = "Model Preference by Agent Type",
-    subtitle = "Positive values favor the weighted model; negative values favor the simple model",
-    x = "True Agent Type",
+  labs(title = "Model Preference by Participant",
+       subtitle = "Positive values favor the weighted model; negative values favor the simple model",
+    x = "Participant ID",
     y = "ELPD Difference (Weighted - Simple)",
-    color = "Preferred Model"
-  ) +
+    color = "ELPD Difference") +
+  scale_color_viridis_c()+
+  guides(x = guide_axis(angle = 90))+
   theme_minimal()
+ggsave("figs/ELPD_diff.png")
 
-
-print(p_agent_comp)
 ```
 
 
