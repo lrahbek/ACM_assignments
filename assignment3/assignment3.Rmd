@@ -443,25 +443,6 @@ draws_df_simple <- as_draws_df(samples_simple$draws())
 ```
 
 
-
-```{r}
-post_preds_s <- simple_sum[grepl("post_pred_rating", simple_sum$variable) == T,
-                         c("variable", "median")]
-
-post_preds_s$agent_id <- str_remove(str_split_i(post_preds_s$variable, ",", 1), "post_pred_rating\\[|")
-post_preds_s$face_id <- str_remove(str_split_i(post_preds_s$variable, ",", 2), "\\]")
-post_preds_s$median <- as.integer(post_preds_s$median)
-
-
-
-
-plot(array(post_preds_s$median, dim = c(40, 153)), 
-     (data_simple$second_rating))
-
-plot(density(abs(post_preds_s$median[post_preds_s$agent_id == 1] data_simple$second_rating[1,])))
-```
-
-
 ## Compile and fit weighted model
 ```{r}
 file_weighted <- file.path("stan/weighted_agent.stan")
