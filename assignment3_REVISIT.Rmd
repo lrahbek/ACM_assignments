@@ -695,8 +695,7 @@ p2_weighted <- ggplot() +
   theme_minimal()
 
 # Display Plots
-p1_weighted
-p2_weighted
+p1_weighted + p2_weighted
 
 
 
