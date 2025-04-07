@@ -32,7 +32,7 @@ Both models are implemented in Stan and fitted using `cmdstanr`.
 Models were first fitted to simulated data to assess:
 - Parameter recovery
 - Inference quality
-- R-hat, trace plots
+- Markov Chains (R-hat, trace plots)
 - Posterior vs true parameter values
 
 ## Model Fitting & Evaluation
