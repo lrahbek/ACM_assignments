@@ -17,7 +17,7 @@ pacman::p_load(tidyverse, here, posterior, cmdstanr, brms, tidybayes, rstan,
 
 # FUNCTIONS
 
-## Feedback function
+## Feedback Function
 Function generates a feedback based on the 'first rating' and returns the group rating (first_rating+(feedback)). Feedback values can be between -3 and 3 (as in the original experiment). The feedback is sampled from from the list of values so the group rating does not lie outside the possible rating range (0-7). 
 ```{r}
 feedback_fun <- function(first_rating){
@@ -30,7 +30,7 @@ feedback_fun <- function(first_rating){
 ```
 
 
-## Function for simulating first- and group-rating
+## Function for Simulating First- and Group Ratings
 Simulates ratings for one agent for given amount of stimuli (trials)
 ```{r}
 simulating_ratings <- function(n_stim, max_rating){
@@ -47,7 +47,7 @@ simulating_ratings <- function(n_stim, max_rating){
 }
 ```
 
-## Beta Binomial Agent - simple model
+## Beta Binomial Agent - Simple Model
 Simulating second_rating!
 ```{r}
 betaBinomialModel_simple <- function(alpha_prior, beta_prior, first_ratings, 
@@ -73,7 +73,7 @@ betaBinomialModel_simple <- function(alpha_prior, beta_prior, first_ratings,
 }
 ```
 
-## Beta Binomial Agent - weighted model
+## Beta Binomial Agent - Weighted Model
 ```{r}
 betaBinomialModel_weighted <- function(alpha_prior, beta_prior, first_ratings,
                                        group_ratings, max_rating, n_stim, 
@@ -110,7 +110,7 @@ betaBinomialModel_weighted <- function(alpha_prior, beta_prior, first_ratings,
 
 # SIMULATE DATA
 Simulate data for both simple and weighted model
-## Parameters for both models
+## Parameters for Both Models
 ```{r}
 n_stim <- 153 # number of stimuli (faces)
 max_rating <- 7 # maximum possible rating
@@ -119,7 +119,9 @@ n_populations <- 1 # number of populations
 ```
 
 
-## Simple (non weighted) simulation
+## Simple Simulation
+Alpha prior = 1
+Beta prior = 1
 ```{r}
 # Arrays for first and group ratings 
 first_rating_s <- array(NA, dim = c(n_agents, n_stim))
@@ -159,6 +161,12 @@ rm(first_rating_s, second_rating_s, group_rating_s, expected_rate_s,
 ```
 
 ## Weighted simulation
+Parameters are defined in log-scale 
+scaling factor mu = 1.5  - exp(1.5) = 4.48
+scaling factor sigma = 0.3  - exp(0.3) = 1.34
+weight ratio mu = 1 - exp(1) = 2.72
+weight ratio sigma = 0.5 - exp(0.5) = 1.65
+  
 ```{r}
 # Arrays for first and group ratings 
 first_rating_w <- array(NA, dim = c(n_populations, n_agents, n_stim))
@@ -240,10 +248,8 @@ rm(first_rating_w, second_rating_w, group_rating_w, expected_rate_w,
 ```
 
 
-
-
 # STAN MODELS 
-## STAN MODEL of the simple agent
+## STAN MODEL of the Simple Agents
 ```{r}
 stan_model_simple <- "
 data {
@@ -307,7 +313,7 @@ write_stan_file(
 rm(stan_model_simple) #clean up
 ```
 
-## STAN MODEL of the weighted agent model
+## STAN MODEL of the Weighted Agents
 ```{r}
 stan_model_weighted <- "
 data {
@@ -467,7 +473,7 @@ rm(stan_model_weighted) #clean up
 
 
 # COMPILE AND FIT MODELS: SIMULATED DATA
-## Compile and fit simple model
+## Compile and Fit Simple Model
 ```{r}
 file_simple <- file.path("stan/simple_agent.stan")
 mod_simple <- cmdstan_model(file_simple, 
@@ -488,15 +494,12 @@ samples_simple <- mod_simple$sample(
 simple_sum <- samples_simple$summary()
 draws_df_simple <- as_draws_df(samples_simple$draws())
 ```
-
+## Summary of Parameters of Interest for Simple Model
 ```{r}
 simple_sum[simple_sum$variable == "alpha_prior" | simple_sum$variable == "beta_prior",]
-
 ```
 
-
-
-## Compile and fit weighted model
+## Compile and Fit Weighted Model
 ```{r}
 file_weighted <- file.path("stan/weighted_agent.stan")
 mod_weighted <- cmdstan_model(file_weighted, 
@@ -518,8 +521,8 @@ weighted_sum <- samples_weighted$summary()
 draws_df_weighted <- as_draws_df(samples_weighted$draws())
 ```
 
+## Summary of Parameters of Interest for Weighted Model
 ```{r}
-
 weighted_sum[weighted_sum$variable == "population_ratio[1]" |
             weighted_sum$variable == "population_scaling[1]"| 
             weighted_sum$variable == "weight_ratio_sigma[1]" |
@@ -533,7 +536,7 @@ weighted_sum[weighted_sum$variable == "population_ratio[1]" |
 ```
 
 
-## Convergence checks for simple and weighted models 
+## Convergence Checks for Simple and Weighted Models 
 ```{r}
 cat("Convergence checks for simple and weighted model \n")
 simple_rhat_issues <- simple_sum %>%
@@ -549,25 +552,22 @@ cat("Weighted model parameters with Rhat > 1.05:",
 
 
 # MODEL QUALITY CHECKS
-## Markov Chains - simple model 
+## Markov Chains - Simple Model 
 ```{r}
 ggplot(draws_df_simple, aes(.iteration, alpha_prior, group = .chain, color = .chain)) +
   geom_line() +
-  ggtitle("simple model: alpha prior")+
+  ggtitle("Simple Model: Alpha Prior")+
   theme_classic()
 ggsave("figs/markov_chains_simple_alpha_prior.png")
 
-
 ggplot(draws_df_simple, aes(.iteration, beta_prior, group = .chain, color = .chain)) +
   geom_line() +
-  ggtitle("simple model: beta prior")+
+  ggtitle("Simple Model: Beta Prior")+
   theme_classic()
 ggsave("figs/markov_chains_simple_beta_prior.png")
-
 ```
-## Markov Chains - Weighted Model
 
-(trying to plot the trace plot of weight_ratio_mu, that is indexed by population)
+## Markov Chains - Weighted Model
 ```{r}
 draws_df_weighted %>%
   select(.iteration, .chain, starts_with("weight_ratio_mu[")) %>%
@@ -578,7 +578,6 @@ draws_df_weighted %>%
   labs(title = "Weighted Model: Weight Ratio Mu")
 ggsave("figs/markov_chains_weighted_weight_ratio_mu.png")
 
-
 draws_df_weighted %>%
   select(.iteration, .chain, starts_with("weight_ratio_sigma[")) %>%
   pivot_longer(cols = starts_with("weight_ratio_sigma["), names_to = "param", values_to = "value") %>%
@@ -587,7 +586,6 @@ draws_df_weighted %>%
   theme_classic() +
   labs(title = "Weighted Model: Weight Ratio Sigma")
 ggsave("figs/markov_chains_weighted_weight_ratio_sigma.png")
-
 
 draws_df_weighted %>%
   select(.iteration, .chain, starts_with("scaling_mu[")) %>%
@@ -598,7 +596,6 @@ draws_df_weighted %>%
   labs(title = "Weighted Model: Weight Scaling Mu")
 ggsave("figs/markov_chains_weighted_scaling_mu.png")
 
-
 draws_df_weighted %>%
   select(.iteration, .chain, starts_with("scaling_sigma[")) %>%
   pivot_longer(cols = starts_with("scaling_sigma["), names_to = "param", values_to = "value") %>%
@@ -607,13 +604,11 @@ draws_df_weighted %>%
   theme_classic() +
   labs(title = "Weighted Model: Weight Ratio Sigma")
 ggsave("figs/markov_chains_weighted_scaling_sigma.png")
-
 ```
 
 # FIT MODELS: REAL DATA
-
-## Load data and format to list
-(as the weighted model is multilevel, and the simple model isnt (i.e. one has 3D arrays and one hasnt), two different data versions are made)
+## Load Data and Format to List
+as the weighted model is multilevel, and the simple model isnt explicitly (i.e. one has 3D arrays and one hasnt), two different data versions are made.
 ```{r}
 # Load data
 data <- read_csv("data/Simonsen_clean.csv", show_col_types = F,
@@ -651,7 +646,7 @@ rm(data_real) #clean up
 ```
 
 
-## Fit simple and weighted model to real data
+## Fit Simple Model to Real Data & Summarise Parameters
 ```{r}
 samples_simple_DR <- mod_simple$sample(
   data = data_real_simple,
@@ -670,7 +665,7 @@ draws_simple_DR <- as_draws_df(samples_simple_DR$draws())
 simple_sum_DR[simple_sum_DR$variable == "alpha_prior" | simple_sum_DR$variable == "beta_prior",]
 ```
 
-
+## Fit Weighted Model to Real Data and Summarise Parameters
 ```{r}
 samples_weighted_DR <- mod_weighted$sample(
   data = data_real_weighted,
@@ -696,7 +691,7 @@ weighted_sum_DR[weighted_sum_DR$variable == "population_ratio[1]" |
 ```
 
 
-## Convergence checks for simple and weighted models: REAL DATA
+## Convergence Checks for Simple and Weighted Models: REAL DATA
 ```{r}
 cat("Convergence checks for simple and weighted model (fit to real data) \n")
 simple_rhat_issues_DR <- simple_sum_DR %>%
@@ -708,17 +703,6 @@ weighted_rhat_issues_DR <- weighted_sum_DR %>%
   filter(rhat > 1.05) %>% nrow()
 cat("Weighted model parameters with Rhat > 1.05:", 
     weighted_rhat_issues_DR, "out of", nrow(weighted_sum_DR), "\n")
-```
-
-```{r}
-# Extract posterior samples for key parameters
-
-# From weighted model
-population_ratio_mu_weighted <- mean(exp(draws_weighted_DR$`weight_ratio_mu[1]` ))
-population_scaling_mu_weighted <- mean(exp(draws_weighted_DR$`scaling_mu[1]`))
-population_ratio_sigma_weighted <- mean(draws_weighted_DR$`weight_ratio_sigma[1]`)
-population_scaling_sigma_weighted <- mean(draws_weighted_DR$`scaling_sigma[1]`)
-
 ```
 
 
@@ -739,10 +723,7 @@ model_weights <- loo_model_weights(list(
 
 # Print model weights
 print(model_weights)
-```
 
-
-```{r}
 model_comp_data <- tibble(
   model = names(model_weights),
   weight = as.numeric(model_weights))
@@ -760,8 +741,6 @@ ggplot(model_comp_data, aes(x = model, y = weight, fill = model)) +
   theme(legend.position = "none")
 ggsave("figs/model_weights.png")
 ```
-
-
 
 ## Compare Model for each Participant
 ```{r}
@@ -790,7 +769,7 @@ elpd_by_agent <- elpd_by_agent %>%
 
 ```
 
-## Vizualisation
+## Vizualisation of Model Preference for each Participant
 ```{r}
 ggplot(elpd_by_agent, aes(x = as.factor(ID), y = elpd_diff, color = elpd_diff)) +
   geom_point() +
@@ -804,7 +783,6 @@ ggplot(elpd_by_agent, aes(x = as.factor(ID), y = elpd_diff, color = elpd_diff)) 
   guides(x = guide_axis(angle = 90))+
   theme_minimal()
 ggsave("figs/ELPD_diff.png")
-
 ```
 
 
