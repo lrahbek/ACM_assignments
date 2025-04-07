@@ -80,21 +80,45 @@ generated quantities {
   array[n_populations] real population_weight_first;
   array[n_populations] real population_weight_group;
 
+  // Arrays for log liklihood, prior and posterior predictive second ratings 
   array[n_populations, n_agents, n_stim] real log_lik;  // Log likelihood for model comparison
-  array[n_populations, n_agents, n_stim] int pred_second_rating; // Population and individual predictions
+  array[n_populations, n_agents, n_stim] int prior_pred_rating; // prior predictive second ratings
+  array[n_populations, n_agents, n_stim] int post_pred_rating; // posterior predictiove second ratings
+  
+  // Generate prior and posterior predictive ratings: 
   
   for (p in 1:n_populations){
+    // Calculate converted parameters: 
     population_ratio[p] = exp(weight_ratio_mu[p]);
     population_scaling[p] = exp(scaling_mu[p]);
     population_weight_first[p] = population_scaling[p] * population_ratio[p] / (1 + population_ratio[p]);
     population_weight_group[p] = population_scaling[p] / (1 + population_ratio[p]);
-  
+    
+    // Generate population level values for prior predictive checks
+    real weight_ratio_mu_prior = normal_rng(0, 1);
+    real weight_ratio_sigma_prior = exponential_rng(2);
+    real scaling_mu_prior = normal_rng(0,1);
+    real scaling_sigma_prior = exponential_rng(2);
+
     for (i in 1:n_agents){
+      // Define weights for first and group information for posterior predictive checks
       real w_first = weight_first[p, i];
       real w_group = weight_group[p, i];
       
+      // Generate individual level variance values for prior predictive checks
+      real z_weight_ratio_prior = std_normal_rng();
+      real z_scaling_prior = std_normal_rng();
+      
+      // Calculate weight ratio and scaling factor for prior predictive checks
+      real weight_ratio_prior= exp(weight_ratio_mu_prior + z_weight_ratio_prior * weight_ratio_sigma_prior);
+      real scaling_factor_prior = exp(scaling_mu_prior + z_scaling_prior * scaling_sigma_prior);
+      
+      // Calculate weights for first and group information for prior predivtive checks 
+      real w_first_prior = scaling_factor_prior * weight_ratio_prior / (1 + weight_ratio_prior);
+      real w_group_prior = scaling_factor_prior / (1 + weight_ratio_prior);
+      
       for (j in 1:n_stim){
-        // calculate weighted information 
+        // calculate weighted information: posterior predictive checks  
         real first_rating_w = first_rating[p, i, j] * w_first;
         real group_rating_w = group_rating[p, i, j] * w_group;
         real neg_first_rating_w = (max_rating - first_rating[p, i, j]) * w_first;
@@ -102,11 +126,23 @@ generated quantities {
         real alpha_post = 1 + first_rating_w + group_rating_w;
         real beta_post = 1 + neg_first_rating_w + neg_group_rating_w;
         
-        // Generate predictions using beta-binomial
-        pred_second_rating[p, i, j] = beta_binomial_rng(7, alpha_post, beta_post);
+        // Posterior predictive second ratings 
+        post_pred_rating[p, i, j] = beta_binomial_rng(7, alpha_post, beta_post);
         
         // Calculate log likelihood
-        log_lik[p, i, j] = beta_binomial_lpmf(second_rating[p, i, j] | 7, alpha_post, beta_post);        
+        log_lik[p, i, j] = beta_binomial_lpmf(second_rating[p, i, j] | 7, alpha_post, beta_post); 
+        
+        // calculate weighted information: prior predictive checks  
+        real first_rating_w_prior = first_rating[p, i, j] * w_first_prior;
+        real group_rating_w_prior = group_rating[p, i, j] * w_group_prior;
+        real neg_first_rating_w_prior = (max_rating - first_rating[p, i, j]) * w_first_prior;
+        real neg_group_rating_w_prior = (max_rating - group_rating[p, i, j]) * w_group_prior;
+        real alpha_post_prior = 1 + first_rating_w_prior + group_rating_w_prior;
+        real beta_post_prior = 1 + neg_first_rating_w_prior + neg_group_rating_w_prior;
+        
+        // Posterior predictive second ratings 
+        prior_pred_rating[p, i, j] = beta_binomial_rng(7, alpha_post_prior, beta_post_prior);
+        
       }
     }
   }

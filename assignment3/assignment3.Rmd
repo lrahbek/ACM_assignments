@@ -259,7 +259,10 @@ parameters{
   real <lower=0, upper=10> beta_prior;
 }
 model {
-
+  //priors
+  target += uniform_lpdf(alpha_prior | 1, 3);
+  target += uniform_lpdf(beta_prior | 1, 3);  
+  
   for (i in 1:n_agents) {
     for (j in 1:n_stim) {
       real alpha_post = alpha_prior + first_rating[i, j] + group_rating[i, j];
@@ -279,8 +282,16 @@ generated quantities {
   for (i in 1:n_agents) {
     for (j in 1:n_stim) {
       
-      prior_pred_rating[i, j] = beta_binomial_rng(7, 1, 1);
+      //generate prior predictions
+      real alpha_prior_prior = uniform_rng(1, 3);
+      real beta_prior_prior = uniform_rng(1, 3);
       
+      real alpha_post_prior = alpha_prior_prior + first_rating[i, j] + group_rating[i, j];
+      real beta_post_prior = beta_prior_prior + (max_rating - first_rating[i, j]) + (max_rating - group_rating[i, j]);
+      
+      prior_pred_rating[i, j] = beta_binomial_rng(7, alpha_post_prior, beta_post_prior);
+      
+      // posterior predictions 
       real alpha_post = alpha_prior + first_rating[i, j] + group_rating[i, j];
       real beta_post = beta_prior+(max_rating - first_rating[i, j]) + (max_rating - group_rating[i, j]);
       
@@ -380,21 +391,45 @@ generated quantities {
   array[n_populations] real population_weight_first;
   array[n_populations] real population_weight_group;
 
+  // Arrays for log liklihood, prior and posterior predictive second ratings 
   array[n_populations, n_agents, n_stim] real log_lik;  // Log likelihood for model comparison
-  array[n_populations, n_agents, n_stim] int pred_second_rating; // Population and individual predictions
+  array[n_populations, n_agents, n_stim] int prior_pred_rating; // prior predictive second ratings
+  array[n_populations, n_agents, n_stim] int post_pred_rating; // posterior predictiove second ratings
+  
+  // Generate prior and posterior predictive ratings: 
   
   for (p in 1:n_populations){
+    // Calculate converted parameters: 
     population_ratio[p] = exp(weight_ratio_mu[p]);
     population_scaling[p] = exp(scaling_mu[p]);
     population_weight_first[p] = population_scaling[p] * population_ratio[p] / (1 + population_ratio[p]);
     population_weight_group[p] = population_scaling[p] / (1 + population_ratio[p]);
-  
+    
+    // Generate population level values for prior predictive checks
+    real weight_ratio_mu_prior = normal_rng(0, 1);
+    real weight_ratio_sigma_prior = exponential_rng(2);
+    real scaling_mu_prior = normal_rng(0,1);
+    real scaling_sigma_prior = exponential_rng(2);
+
     for (i in 1:n_agents){
+      // Define weights for first and group information for posterior predictive checks
       real w_first = weight_first[p, i];
       real w_group = weight_group[p, i];
       
+      // Generate individual level variance values for prior predictive checks
+      real z_weight_ratio_prior = std_normal_rng();
+      real z_scaling_prior = std_normal_rng();
+      
+      // Calculate weight ratio and scaling factor for prior predictive checks
+      real weight_ratio_prior= exp(weight_ratio_mu_prior + z_weight_ratio_prior * weight_ratio_sigma_prior);
+      real scaling_factor_prior = exp(scaling_mu_prior + z_scaling_prior * scaling_sigma_prior);
+      
+      // Calculate weights for first and group information for prior predivtive checks 
+      real w_first_prior = scaling_factor_prior * weight_ratio_prior / (1 + weight_ratio_prior);
+      real w_group_prior = scaling_factor_prior / (1 + weight_ratio_prior);
+      
       for (j in 1:n_stim){
-        // calculate weighted information 
+        // calculate weighted information: posterior predictive checks  
         real first_rating_w = first_rating[p, i, j] * w_first;
         real group_rating_w = group_rating[p, i, j] * w_group;
         real neg_first_rating_w = (max_rating - first_rating[p, i, j]) * w_first;
@@ -402,11 +437,23 @@ generated quantities {
         real alpha_post = 1 + first_rating_w + group_rating_w;
         real beta_post = 1 + neg_first_rating_w + neg_group_rating_w;
         
-        // Generate predictions using beta-binomial
-        pred_second_rating[p, i, j] = beta_binomial_rng(7, alpha_post, beta_post);
+        // Posterior predictive second ratings 
+        post_pred_rating[p, i, j] = beta_binomial_rng(7, alpha_post, beta_post);
         
         // Calculate log likelihood
-        log_lik[p, i, j] = beta_binomial_lpmf(second_rating[p, i, j] | 7, alpha_post, beta_post);        
+        log_lik[p, i, j] = beta_binomial_lpmf(second_rating[p, i, j] | 7, alpha_post, beta_post); 
+        
+        // calculate weighted information: prior predictive checks  
+        real first_rating_w_prior = first_rating[p, i, j] * w_first_prior;
+        real group_rating_w_prior = group_rating[p, i, j] * w_group_prior;
+        real neg_first_rating_w_prior = (max_rating - first_rating[p, i, j]) * w_first_prior;
+        real neg_group_rating_w_prior = (max_rating - group_rating[p, i, j]) * w_group_prior;
+        real alpha_post_prior = 1 + first_rating_w_prior + group_rating_w_prior;
+        real beta_post_prior = 1 + neg_first_rating_w_prior + neg_group_rating_w_prior;
+        
+        // Posterior predictive second ratings 
+        prior_pred_rating[p, i, j] = beta_binomial_rng(7, alpha_post_prior, beta_post_prior);
+        
       }
     }
   }
@@ -430,7 +477,7 @@ samples_simple <- mod_simple$sample(
   data = data_simple,
   seed = 120,
   refresh = 500,
-  chains = 1, #2
+  chains = 2,
   parallel_chains = 2,
   threads_per_chain = 2,
   iter_warmup = 1000,
@@ -441,6 +488,12 @@ samples_simple <- mod_simple$sample(
 simple_sum <- samples_simple$summary()
 draws_df_simple <- as_draws_df(samples_simple$draws())
 ```
+
+```{r}
+simple_sum[simple_sum$variable == "alpha_prior" | simple_sum$variable == "beta_prior",]
+
+```
+
 
 
 ## Compile and fit weighted model
@@ -453,7 +506,7 @@ samples_weighted <- mod_weighted$sample(
   data = data_weighted,
   seed = 120,
   refresh = 500,
-  chains = 1,#2
+  chains = 2,
   parallel_chains = 2,
   threads_per_chain = 2,
   iter_warmup = 1000,
@@ -465,6 +518,19 @@ weighted_sum <- samples_weighted$summary()
 draws_df_weighted <- as_draws_df(samples_weighted$draws())
 ```
 
+```{r}
+
+weighted_sum[weighted_sum$variable == "population_ratio[1]" |
+            weighted_sum$variable == "population_scaling[1]"| 
+            weighted_sum$variable == "weight_ratio_sigma[1]" |
+            weighted_sum$variable == "scaling_sigma[1]" |
+            weighted_sum$variable == "population_weight_first[1]" |
+            weighted_sum$variable == "population_weight_group[1]",  ]
+
+## true scaling sigma = 0.3 (exp(03)= 1.34
+## true ratio sigma = 0.5 (exp(0.5) = 1.65)
+## true scaling = 4.48, true ratio = 2.72
+```
 
 
 ## Convergence checks for simple and weighted models 
@@ -481,8 +547,9 @@ cat("Weighted model parameters with Rhat > 1.05:",
     weighted_rhat_issues, "out of", nrow(weighted_sum), "\n")
 ```
 
+
 # MODEL QUALITY CHECKS
-## Markov chains
+## Markov Chains - simple model 
 ```{r}
 ggplot(draws_df_simple, aes(.iteration, alpha_prior, group = .chain, color = .chain)) +
   geom_line() +
@@ -498,6 +565,7 @@ ggplot(draws_df_simple, aes(.iteration, beta_prior, group = .chain, color = .cha
 ggsave("figs/markov_chains_simple_beta_prior.png")
 
 ```
+## Markov Chains - Weighted Model
 
 (trying to plot the trace plot of weight_ratio_mu, that is indexed by population)
 ```{r}
@@ -507,7 +575,7 @@ draws_df_weighted %>%
   ggplot(aes(x = .iteration, y = value, group = .chain, color = .chain)) +
   geom_line() +
   theme_classic() +
-  labs(title = "weigted model: weight_ratio_mu across p")
+  labs(title = "Weighted Model: Weight Ratio Mu")
 ggsave("figs/markov_chains_weighted_weight_ratio_mu.png")
 
 
@@ -517,7 +585,7 @@ draws_df_weighted %>%
   ggplot(aes(x = .iteration, y = value, group = .chain, color = .chain)) +
   geom_line() +
   theme_classic() +
-  labs(title = "weigted model: weight_ratio_sigma across p")
+  labs(title = "Weighted Model: Weight Ratio Sigma")
 ggsave("figs/markov_chains_weighted_weight_ratio_sigma.png")
 
 
@@ -527,7 +595,7 @@ draws_df_weighted %>%
   ggplot(aes(x = .iteration, y = value, group = .chain, color = .chain)) +
   geom_line() +
   theme_classic() +
-  labs(title = "weigted model: scaling_mu across p")
+  labs(title = "Weighted Model: Weight Scaling Mu")
 ggsave("figs/markov_chains_weighted_scaling_mu.png")
 
 
@@ -537,87 +605,10 @@ draws_df_weighted %>%
   ggplot(aes(x = .iteration, y = value, group = .chain, color = .chain)) +
   geom_line() +
   theme_classic() +
-  labs(title = "weigted model: scaling_sigma across p")
+  labs(title = "Weighted Model: Weight Ratio Sigma")
 ggsave("figs/markov_chains_weighted_scaling_sigma.png")
 
 ```
-
-## Prior predictive checks and posterior predictive checks - simple model
-```{r}
-# Prior predictions
-prior_predictions <- draws_df_simple %>%
-  select(starts_with("prior_pred_rating[")) %>%
-  pivot_longer(cols = everything(),
-               names_to = "index",
-               values_to = "prediction") %>%
-  mutate(index = str_extract(index, "\\[(\\d+),(\\d+)\\]"),
-         agent = as.integer(str_extract(index, "\\d+")),
-         trial = as.integer(str_extract(index, "(?<=,)\\d+"))) %>%
-  select(agent, trial, prediction)
-
-prior_summary <- prior_predictions %>%
-  group_by(trial) %>%
-  summarise(
-    mean = mean(prediction),
-    lower = quantile(prediction, 0.025),
-    upper = quantile(prediction, 0.975))
-
-# Posterior predictions
-posterior_predictions <- draws_df_simple %>%
-  select(starts_with("post_pred_rating[")) %>%
-  pivot_longer(cols = everything(),
-               names_to = "index",
-               values_to = "prediction") %>%
-  mutate(index = str_extract(index, "\\[(\\d+),(\\d+)\\]"),
-         agent = as.integer(str_extract(index, "\\d+")),
-         trial = as.integer(str_extract(index, "(?<=,)\\d+"))) %>%
-  select(agent, trial, prediction)
-
-posterior_summary <- posterior_predictions %>%
-  group_by(trial) %>%
-  summarise(
-    mean = mean(prediction),
-    lower = quantile(prediction, 0.025),
-    upper = quantile(prediction, 0.975))
-
-# converting our second_rating into a tibble
-true_rating <- as_tibble(data_simple$second_rating) %>%
-  mutate(agent = row_number()) %>%
-  pivot_longer(cols = -agent, names_to = "trial", values_to = "rating") %>%
-  mutate(trial = as.integer(str_extract(trial, "\\d+")))
-
-# Plot: Prior Predictive Check
-p1 <- ggplot() +
-  geom_ribbon(data = prior_summary, aes(x = trial, ymin = lower, ymax = upper), 
-              alpha = 0.2, fill = "red") +
-  geom_line(data = prior_summary, aes(x = trial, y = mean), color = "red") +
-  geom_point(data = true_rating, aes(x = trial, y = rating), alpha = 0.2) +
-  labs(title = "Prior Predictive Check", x = "Trial", y = "Rating") +
-  theme_minimal()
-
-# Plot: Posterior Predictive Check
-p2 <- ggplot() +
-  geom_ribbon(data = posterior_summary, aes(x = trial, ymin = lower, ymax = upper),
-              alpha = 0.2, fill = "blue") +
-  geom_line(data = posterior_summary, aes(x = trial, y = mean), color = "blue") +
-geom_point(data = true_rating, aes(x = trial, y = rating), alpha = 0.2) +
-  labs(title = "Posterior Predictive Check", x = "Trial", y = "Rating") +
-  theme_minimal()
-
-# combine and save to folder
-p1 + p2
-ggsave("figs/posterior_&_prior_predictive_check_simple.png", width = 18, height = 7)
-```
-
-## Prior predictive checks and posterior predictive checks - weighted model
-```{r}
-
-
-
-```
-
-
-
 
 # FIT MODELS: REAL DATA
 
@@ -637,6 +628,7 @@ data_real <- list(n_stim = length(unique(data$FaceID)),
                   first_rating = NA, 
                   group_rating = NA)
 
+length(unique(data$ID))
 # make a data version for each of the models : simple
 data_real_simple <- data_real
 data_real_simple$second_rating <- array(data$SecondRating-1, 
@@ -675,6 +667,7 @@ samples_simple_DR <- mod_simple$sample(
 )
 simple_sum_DR <- samples_simple_DR$summary()
 draws_simple_DR <- as_draws_df(samples_simple_DR$draws()) 
+simple_sum_DR[simple_sum_DR$variable == "alpha_prior" | simple_sum_DR$variable == "beta_prior",]
 ```
 
 
@@ -693,6 +686,13 @@ samples_weighted_DR <- mod_weighted$sample(
 )
 weighted_sum_DR <- samples_weighted_DR$summary()
 draws_weighted_DR <- as_draws_df(samples_weighted_DR$draws())
+
+weighted_sum_DR[weighted_sum_DR$variable == "population_ratio[1]" |
+                weighted_sum_DR$variable == "population_scaling[1]"| 
+                weighted_sum_DR$variable == "weight_ratio_sigma[1]" |
+                weighted_sum_DR$variable == "scaling_sigma[1]" |
+                weighted_sum_DR$variable == "population_weight_first[1]" |
+                weighted_sum_DR$variable == "population_weight_group[1]",  ]
 ```
 
 
@@ -702,29 +702,24 @@ cat("Convergence checks for simple and weighted model (fit to real data) \n")
 simple_rhat_issues_DR <- simple_sum_DR %>%
   filter(rhat > 1.05) %>% nrow()
 cat("Simple model parameters with Rhat > 1.05:", 
-    simple_rhat_issues_DR, "out of", nrow(simple_sum), "\n")
+    simple_rhat_issues_DR, "out of", nrow(simple_sum_DR), "\n")
 
 weighted_rhat_issues_DR <- weighted_sum_DR %>%
   filter(rhat > 1.05) %>% nrow()
 cat("Weighted model parameters with Rhat > 1.05:", 
-    weighted_rhat_issues_DR, "out of", nrow(weighted_sum), "\n")
+    weighted_rhat_issues_DR, "out of", nrow(weighted_sum_DR), "\n")
 ```
 
 ```{r}
 # Extract posterior samples for key parameters
 
 # From weighted model
-population_ratio_weighted <- mean(exp(draws_weighted_DR$`weight_ratio_mu[1]` ))
-population_scaling_weighted <- mean(exp(draws_weighted_DR$`scaling_mu[1]`))
+population_ratio_mu_weighted <- mean(exp(draws_weighted_DR$`weight_ratio_mu[1]` ))
+population_scaling_mu_weighted <- mean(exp(draws_weighted_DR$`scaling_mu[1]`))
 population_ratio_sigma_weighted <- mean(draws_weighted_DR$`weight_ratio_sigma[1]`)
 population_scaling_sigma_weighted <- mean(draws_weighted_DR$`scaling_sigma[1]`)
 
 ```
-
-
-
-
-# MODEL QUALITY CHECKS 
 
 
 # MODEL COMPARISON
