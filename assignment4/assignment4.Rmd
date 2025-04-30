@@ -8,3 +8,165 @@ date: "2025-04-28"
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+
+# Load Packages
+```{r}
+pacman::p_load("ggplot2", "tidyverse")
+```
+
+
+# EMPERICAL DATA
+## Load Emperical Data and Clean it
+Data used contains: 
+- *The 'dangerous' category* (not 'nutrisious')
+- *Condition 1* dyads (not condition 2 (individuals))
+- *Session 1* danger: aliens with spots AND eyes on stalks (not sessions 2 and 3)
+- *Non-test rows* 
+```{r}
+emp_data <- read.delim("data/AlienData.txt", sep = ",")
+emp_data$subject <- as.factor(emp_data$subject)  # make subject categorical
+emp_data <- emp_data[emp_data$session == 1 &     # incl only session 1
+                       emp_data$condition == 1 & # incl only condition 1
+                       emp_data$test == 0,]      # remove test rows
+# remove columns not used
+emp_data <- emp_data %>% 
+  select(-c(condition, session, test, nutricious, RT, motivation, competence, communication, complement))
+emp_data
+```
+
+## Expand Features
+Stimulus column contains the alien-file names. The features are indicated by a 0 or 1 in a set position: 
+*1. eyes*: on stalks = 1, not on stalks = 0
+*2. legs*: small = 1, big = 0
+*3. spots*: spots = 1, no spots = 0
+*4. arms*: up = 1, down = 0
+*5. color*: green = 1, blue = 0
+The five features are added as binary columns
+```{r}
+emp_data[,c("eyes", "legs", "spots", "arms", "color")] <- str_split_fixed(emp_data$stimulus, pattern = "", n = 6)[,1:5]
+emp_data[c("stimulus","eyes", "legs", "spots", "arms", "color")]
+```
+
+## Plot the Emperical Data
+Calculate mean cumulative value per trial and plot it along each subjects
+```{r}
+mean <- emp_data %>%
+  group_by(trial) %>%
+  summarise_at(vars(cumulative), list(mean = mean))
+ggplot()+
+  geom_line(data = emp_data, aes(group = subject, x = trial, y = cumulative/100), color = "grey")+
+  geom_line(data = mean, aes(x = trial, y = mean/100), color = "red")+
+  annotate(geom="text", x= 104+4, y= mean$mean[mean$trial == 104]/100, 
+             label="Mean", color = "Red") +
+  theme_minimal()
+```
+
+
+# FUNCTIONS 
+
+## Experiment Function
+The function implements the structure of the experiment, and returns a df with the order of the stimuli for a given number of cycles. It has the following parameters: 
+*stimuli*: list of unique stimuli (the 32 alien-filenames)
+*cycles*: the number of times the stimuli should be repeated (3 cycles)
+*danger_fun*: how the 'danger' category is implemented (so far just the 'ADD' option)
+*danger_features*: the features indicating danger
+*danger_vals*: the values each of the danger features should have to be dangerous. 
+The function returns a dataframe with nrows = number of stimuli * cycles. A stimuli column, a cycle column and a danger column. 
+```{r}
+experiment <- function(stimuli, cycles, danger_fun = "ADD", danger_features, danger_vals){
+  trials <- length(stimuli)*cycles
+  n_stim <- length(stimuli)
+  stim_df <- data.frame(cycle = rep(NA, trials), stimuli = rep(NA, trials), danger = rep(NA, trials))
+  
+  for(cycle in 1:cycles){
+    stim_order <- sample(stimuli, size = n_stim, replace = F)
+    
+    for(i in 1:n_stim){
+      n_trial <- i+((cycle-1) *32)
+      stim_df[n_trial, "cycle"] <- cycle
+      stim_df[n_trial , "stimuli"] <- stim_order[i]
+    }
+  } 
+  stim_df[,c("eyes", "legs", "spots", "arms", "color")] <- str_split_fixed(stim_df$stimuli, pattern = "", n = 5)
+  
+  if(danger_fun == "ADD"){
+    stim_df$danger <- ifelse(stim_df[danger_features[1]] == danger_vals[1] & 
+                             stim_df[danger_features[2]] == danger_vals[2], 1, 0)[,1]
+  }
+  else{
+    print("The danger function is not implemented in the experiment function")
+  }
+  return(stim_df)
+}
+```
+
+
+## Agent Function
+
+```{r}
+
+```
+
+
+
+
+# SIMULATION
+
+## Simulate Agents
+```{r}
+stimuli <- unique(str_split_fixed(emp_data$stimulus, pattern = ".jpg", n = 2)[,1])
+cycles <- 3
+
+exp_df <- experiment(stimuli, cycles, danger_fun = "ADD", 
+                     danger_features = c("eyes", "spots"), danger_vals = c(1, 1))
+
+exp_df
+```
+
+## Plot the Performance of the Simulated Agents 
+
+```{r}
+
+```
+
+
+
+
+# STAN MODEL
+
+```{r}
+
+```
+
+
+# FIT & CHECK STAN ON SIMULATED DATA 
+
+## Fit the STAN Model (Simulated Data)
+```{r}
+
+```
+
+## Model Quality Checks (Simulated Data)
+```{r}
+
+```
+
+
+# FIT & CHECK STAN ON EMPERICAL DATA
+
+## Fit the STAN Model (Emperical Data)
+```{r}
+
+```
+
+## Model Quality Checks (Emperical Data)
+```{r}
+
+```
+
+
+
+
+
+
+
