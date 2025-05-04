@@ -15,7 +15,6 @@ pacman::p_load(tidyverse, here, posterior, cmdstanr, brms, tidybayes, rstan,
                ggplot2, dplyr, patchwork)
 ```
 
-
 # EMPERICAL DATA
 ## Load Emperical Data and Clean it
 Data used contains: 
@@ -51,7 +50,6 @@ emp_data <- emp_data %>%
 ```
 
 ## Plot the Emperical Data
-
 ### Cumulative Scores and Performance for each Participant 
 Calculate mean cumulative value per trial and plot it along each subjects
 ```{r}
@@ -78,24 +76,23 @@ p2 <- ggplot(emp_data)+
            label="Mean", color = "green4", size = 3) +
   ggtitle("Emperical Data Performance")+
   theme_minimal()
-
 p1/p2
 ggsave(filename = "figs/emperical_data_performance.png")
 ```
 
 ### Percentage of Correct Categorisation per Stimuli
 ```{r}
-emp_data_sum <- pivot_wider(emp_data[c("stimulus", "correct", "dangerous", "cycle")], 
-                            names_from = correct, values_from = correct, values_fn = length, 
-                            values_fill = 0)
+emp_data_sum <- pivot_wider(
+  emp_data[c("stimulus", "correct", "dangerous", "cycle")], names_from = correct,
+  values_from = correct, values_fn = length, values_fill = 0)
 colnames(emp_data_sum) <- c("stimuli", "danger", "cycle", "wrong", "correct")
-emp_data_sum$stimuli <- str_split_fixed(emp_data_sum$stimuli, pattern = ".jpg", n = 2)[,1]
+emp_data_sum$stimuli <- str_split_fixed(emp_data_sum$stimuli, 
+                                        pattern = ".jpg", n = 2)[,1]
 
 emp_data_sum <- emp_data_sum %>% 
   group_by(cycle) %>% 
   arrange(desc(danger)) %>% 
   group_by(cycle, stimuli) %>% 
-  
   mutate(n = (wrong+correct)) %>% 
   mutate(perc_corr = (correct/n)*100) %>% 
   mutate_at(c("stimuli", "cycle"), as.factor)
@@ -115,9 +112,7 @@ ggplot(emp_data_sum) +
   coord_cartesian(clip = "off")
 ```
 
-
 # FUNCTIONS 
-
 ## Experiment Function
 The function implements the structure of the experiment, and returns a df with the order of the stimuli for a given number of cycles. It has the following parameters: 
 *stimuli*: list of unique stimuli (the 32 alien-filenames)
@@ -127,27 +122,24 @@ The function implements the structure of the experiment, and returns a df with t
 *danger_vals*: the values each of the danger features should have to be dangerous. 
 The function returns a dataframe with nrows = number of stimuli * cycles. A stimuli column, a cycle column and a danger column. 
 ```{r}
-experiment <- function(agent_id, w, c, stimuli, cycles, danger_fun = "ADD", 
+experiment <- function(agent_id, w_key, c, stimuli, cycles, danger_fun = "ADD", 
                        danger_features, danger_vals){
   trials <- length(stimuli)*cycles
   n_stim <- length(stimuli)
-  stim_df <- data.frame(w = rep(w, trials), c = rep(c, trials), 
+  stim_df <- data.frame(w = rep(w_key, trials), c = rep(c, trials), 
                         agent_id = rep(agent_id, trials), trial = 1:trials, 
                         cycle = rep(NA, trials), stimuli = rep(NA, trials), 
                         danger = rep(NA, trials))
-  
   for(cycle in 1:cycles){
     stim_order <- sample(stimuli, size = n_stim, replace = F)
-    
     for(i in 1:n_stim){
       n_trial <- i+((cycle-1) *n_stim)
       stim_df[n_trial, "cycle"] <- cycle
       stim_df[n_trial , "stimuli"] <- stim_order[i]
     }
   } 
-  stim_df[,c("eyes", "legs", "spots", "arms", "color")] <- str_split_fixed(stim_df$stimuli, pattern = "", n = 5)
-  
-  
+  stim_df[,c("eyes", "legs", "spots", "arms", "color")] <- str_split_fixed(
+    stim_df$stimuli, pattern = "", n = 5)
   if(danger_fun == "ADD"){
     stim_df$danger <- ifelse(stim_df[danger_features[1]] == danger_vals[1] & 
                              stim_df[danger_features[2]] == danger_vals[2], 1, 0)[,1]
@@ -160,9 +152,14 @@ experiment <- function(agent_id, w, c, stimuli, cycles, danger_fun = "ADD",
 }
 ```
 
+## Softmax Function
+```{r}
+softmax <- function(vector){
+  return(exp(vector)/sum(exp(vector)))
+}
+```
 
 ## General Context Model Functions
-
 ### Distance & Similarity
 ```{r}
 distance <- function(vect1, vect2, w) {
@@ -173,7 +170,6 @@ similarity <- function(distance, c) {
   return(exp(-c * distance))
 }
 ```
-
 
 ### Agent Functions 
 - *w*       : Attention weight (attention to one parameter dimension, sums to 1)
@@ -197,45 +193,46 @@ gcm_agent <- function(w, c, obs, cat_list){
       }
       # probability of categorising i as dangerous: 
       numerator <- mean(similarities[cat_list[1:(i - 1)] == 1])
-      denominator <- mean(similarities[cat_list[1:(i - 1)] == 1]) + mean(similarities[cat_list[1:(i - 1)] == 0])
+      denominator <- mean(similarities[cat_list[1:(i - 1)] == 1]) + mean(
+        similarities[cat_list[1:(i - 1)] == 0])
       cat_probs <- c(cat_probs, numerator / denominator)
     }
   }
   choices <- rbinom(ntrials, 1, cat_probs)
   return(choices)
 }
-
 ```
-
 
 # SIMULATION
 ## Simulate Agents
 ```{r}
-w_ls <- c(0.25, 0.5, 0.75) # attention weight
-c <- 1                # sensitivity paramater 
+#different weight dists
+weights <- list("even" = softmax(rep(1, 5)), 
+                "eyes_spots" = softmax(c(1.8, 1, 1.8, 1, 1)), 
+                "color_arms" = softmax(c(1, 1, 1, 1.8, 1.8)))
+c <- 1.5                # sensitivity paramater 
 cycles <- 3             # number of times stimuli is repeated
-n_agents <- 30          # number of agents to be simulated 
+n_agents <- 10          # number of agents to be simulated 
 # define unique stimuli: 
 stim <- unique(str_split_fixed(emp_data$stimulus, pattern = ".jpg", n = 2)[,1]) 
 d_features <- c("eyes", "spots")
 d_vals <- c(1, 1)
 
-for (j in 1:length(w_ls)){
-  w <- w_ls[j]
+for (j in 1:length(weights)){
+  w <- weights[[j]]
   for(i in 1:n_agents){
     # create exp data frame and unique stim order for given agent: 
-    exp_df <- experiment(agent_id = i, w = w, c = c, 
+    exp_df <- experiment(agent_id = i, w = names(weights)[j], c = c, 
                          stimuli = stim , cycles = cycles, danger_fun = "ADD",
                          danger_features = d_features, danger_vals = d_vals)
     # generate choices for the agent according to GCM: 
-    exp_df$a_choices <- gcm_agent(w = w, c = c, 
-                                  obs = exp_df[c("eyes", "legs", "spots", "arms", "color")], 
-                                  cat_list = exp_df$danger)
+    exp_df$a_choices <- gcm_agent(
+      w = w, c = c, obs = exp_df[c("eyes", "legs", "spots", "arms", "color")], 
+      cat_list = exp_df$danger)
     # Define correct choices, cumulative scores and performance: 
     exp_df$correct <- ifelse(exp_df$a_choices == exp_df$danger, 1, 0) 
     exp_df$cumulative <- cumsum(ifelse(exp_df$correct == 1, 1, -1))   
     exp_df$performance <- cumsum(exp_df$correct) / seq_along(exp_df$correct)
-    
     if (i == 1){
       sim_data <- exp_df
     }
@@ -251,8 +248,8 @@ for (j in 1:length(w_ls)){
   }
   cat("Finished simulating", n_agents, "agents with w of", w, "\n")
 }
-
 ```
+
 ## Save in STAN-friendly Format
 ```{r}
 
@@ -268,7 +265,7 @@ mean_sim <- sim_data_w %>%
 ggplot()+
   geom_line(data = sim_data_w, aes(x = trial, y = cumulative),color = "grey")+
   geom_line(data = mean_sim, aes(x = trial, y = mean_cum, color = w), show.legend = F)+
-  scale_color_viridis_c()+
+  scale_color_viridis_d()+
   ggtitle("Simulation Cumulative Score (c: 1)")+
   facet_wrap(~w, labeller = label_both)+
   theme_minimal()
@@ -277,7 +274,7 @@ ggsave(filename = "figs/sim_cumulative.png")
 ggplot()+
   geom_line(data = sim_data_w, aes(x = trial, y = performance), color = "grey")+
   geom_line(data = mean_sim, aes(x = trial, y = mean_perf, color = w), show.legend = F)+
-  scale_color_viridis_c()+
+  scale_color_viridis_d()+
   ggtitle("Simulation Performance (c: 1)")+
   facet_wrap(~w, labeller = label_both)+
   theme_minimal()
