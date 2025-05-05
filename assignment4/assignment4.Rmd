@@ -19,14 +19,14 @@ pacman::p_load(tidyverse, here, posterior, cmdstanr, brms, tidybayes, rstan,
 ## Load Emperical Data and Clean it
 Data used contains: 
 - *The 'dangerous' category* (not 'nutrisious')
-- *Condition 2* individuals (not condition 1 (dyads))
+- *Condition 1* dyads (not condition 2)
 - *Session 1* danger: aliens with spots AND eyes on stalks (not sessions 2 and 3)
 - *Non-test rows* 
 ```{r}
 emp_data <- read.delim("data/AlienData.txt", sep = ",")
 emp_data$subject <- as.factor(emp_data$subject)  # make subject categorical
 emp_data <- emp_data[emp_data$session == 1 &     # incl only session 1
-                       emp_data$condition == 2 & # incl only condition 2
+                       emp_data$condition == 1 & # incl only condition 1
                        emp_data$test == 0,]      # remove test rows
 # remove columns not used
 emp_data <- emp_data %>% 
