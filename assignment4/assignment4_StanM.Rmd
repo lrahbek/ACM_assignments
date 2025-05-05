@@ -23,8 +23,7 @@ Data used contains:
 - *Session 1* danger: aliens with spots AND eyes on stalks (not sessions 2 and 3)
 - *Non-test rows* 
 ```{r}
-#emp_data <- read.delim("data/AlienData.txt", sep = ",")
-emp_data <- read.delim("AlienData.csv", sep = ",")
+emp_data <- read.delim("data/AlienData.txt", sep = ",")
 emp_data$subject <- as.factor(emp_data$subject)  # make subject categorical
 emp_data <- emp_data[emp_data$session == 1 &     # incl only session 1
                        emp_data$condition == 1 & # incl only condition 1
