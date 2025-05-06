@@ -176,6 +176,7 @@ distance <- function(vect1, vect2, w) {
 similarity <- function(distance, c) {
   return(exp(-c * distance))
 }
+
 ```
 
 ### Agent Functions 
@@ -220,7 +221,7 @@ weights <- list("even" = softmax(rep(1, 5)),                 # 0.2 0.2 0.2 0.2 0
 c <- 1.5                # sensitivity paramater 
 cycles <- 3             # number of times stimuli is repeated
 
-n_agents <- 10*length(weights)  # number of agents to be simulated: 10 with each of the weight dists 
+n_agents <- 4*length(weights)  # number of agents to be simulated: 10 with each of the weight dists 
 
 # define unique stimuli: 
 stim <- unique(str_split_fixed(emp_data$stimulus, pattern = ".jpg", n = 2)[,1]) 
@@ -323,6 +324,7 @@ stim_df$s_id <- seq(1:nrow(stim_df))
 #combine stim_df with ids and simulated df 
 sim_data_w <- left_join(sim_data_w, stim_df)
 
+
 sim_data <- list(
   total_N = nrow(sim_data_w),                    # total number of observations (all agents)
   nagents = length(unique(sim_data_w$agent_id)), # number of individual agents
@@ -333,20 +335,145 @@ sim_data <- list(
   stimuli = as.matrix(stim_df[c(
   "eyes", "legs", "spots", "arms", "color")]),   # matrix of [nstim, nfeatures] indices: s_id
   cat_danger = stim_df$danger,                   # array of cats with indices as s_id
-  obs = sim_data_w$s_id,                         # array of stim id of length total_N
+  obs = as.matrix(pivot_wider(unique(            # matrix[nagents, ntrials] with obs
+    sim_data_w[c("s_id", "agent_id", "trial")]), 
+            names_from = trial, values_from = s_id)[-1], 
+    dimnames = list(unique(sim_data_w$agent_id), 
+                    unique(sim_data_w$trial))),
   b = 0.5,                                       # bias for selecting one cat over the other
-  choice = sim_data_w$a_choices                  # array of choice for each trial 
+  choice = as.matrix(pivot_wider(unique(sim_data_w[c("danger", "agent_id", "trial")]), 
+            names_from = trial, values_from = danger)[-1], 
+    dimnames = list(unique(sim_data_w$agent_id), 
+                    unique(sim_data_w$trial))),
+  
+  #choice = sim_data_w$a_choices                  # array of choice for each trial 
+  
+  w_prior_values = c(1, 1, 1, 1, 1),
+  c_prior_values = c(0, 1)
 )
 
+
+
+
 ```
-
-
-
 
 
 # STAN MODEL
 
 ```{r}
+stan_gcm <- "
+data{
+  int<lower=1> total_N; 
+  int<lower=1> nagents;
+  int<lower=1> agent_id;
+  int<lower=1> n_trials;
+  int<lower=1> nfeatures;
+  int<lower=1> nstim;
+  
+  real<lower=0, upper=1> b;
+  
+  array[nstim, nfeatures] int<lower=0, upper=1> stimuli; 
+  array[nagents, n_trials] int<lower=1, upper=32> obs;
+  array[nstim] int<lower=0, upper=1> cat_danger;
+  array[nagents, n_trials] int<lower=0, upper=1> choice;
+  
+  //array[total_N]int<lower=0, upper=1> choice; 
+  
+  // priors
+  array[nfeatures] real w_prior_values;  // concentration parameters for dirichlet distribution <lower=1>
+  array[2] real c_prior_values;     // mean and variance for logit-normal distribution
+}
+
+parameters{
+  row_stochastic_matrix[nagents, nfeatures] w;
+  array[nagents] real logit_c;
+
+}
+
+transformed parameters{
+
+  // parameter c
+  array[nagents] real<lower=0, upper=2> c = inv_logit(logit_c)*2;
+  
+  // Parameter r (probability of response = 1 ) 
+  array[nagents, n_trials] real<lower=0.0001, upper=0.9999> r;
+  array[nagents, n_trials] real rr; 
+
+
+  for (a in 1:nagents){
+  
+  	for (i in 1:n_trials){
+  	
+  		array[(i-1)] real exemp_similarities; 
+  		
+  		for (e in 1:(i-1)){ // loop through previous aliens
+  		
+  			array[nfeatures] real tmp_distance;
+  			
+  			for (j in 1:nfeatures){ // loop through each feature in alien e
+  			
+  				tmp_distance[j] = w[a,j]*abs(stimuli[obs[a, e], j] -  stimuli[obs[a, i], j] );
+  			}
+  			
+  			exemp_similarities[e] = exp(-c * sum(tmp_distance));
+  		
+  		}
+  		
+      if (i == 1 || sum(cat_danger[obs[a, (1:i-1)]]) == 0 || sum(cat_danger[obs[a, (1:i-1)]]) == (i-1)){
+        r[i] = 0.5;
+      }
+      else{
+        
+        // calculate similarity
+        
+        array[2] real similarities; // summed similarities for each cat
+        
+        similarities[1] = sum(cat_danger[obs[a, (1:i-1)]]*exemp_similarities);
+        similarities[2] = sum(abs(cat_danger[obs[a, (1:i-1)]]-1)*exemp_similarities);
+        
+        // calculate r[a, i]
+        
+        rr[a, i] = (b*similarities[1]) / (b*similarities[1] + (1-b)*similarities[2]);
+
+        // to make the sampling work
+        
+        if (rr[a, i] > 0.9999){
+          r[a, i] = 0.9999;
+        } else if (rr[a, i] < 0.0001){
+            r[a, i] = 0.0001;
+        } else if (rr[a, i] > 0.0001 && rr[a, i] < 0.9999){
+            r[a, i] = rr[a, i];
+        } else{
+            r[a, i] = 0.5;
+        }
+      }
+  	}
+  }
+}
+
+model {
+  // Priors
+  
+  for (a in 1:nagents){
+    target += dirichlet_lpdf(w[a,] | w_prior_values);
+    target += normal_lpdf(logit_c[a] | c_prior_values[1], c_prior_values[2]);
+  }
+    
+  // Decision Data
+  for (a in 1:nagents){
+    for (i in 1:n_trials){
+      target += bernoulli_lpmf(choice[a, i] | r[a, i]);
+    }
+  }
+}
+
+"
+# Write the model to a file
+write_stan_file(
+  stan_gcm,
+  dir = "stan/",
+  basename = "gcm.stan"
+)
 
 ```
 
@@ -355,6 +482,25 @@ sim_data <- list(
 
 ## Fit the STAN Model (Simulated Data)
 ```{r}
+
+file_gcm <- file.path("stan/gcm.stan")
+mod_gcm <- cmdstan_model(file_gcm, 
+                            cpp_options = list(stan_threads = TRUE))
+
+samples_gcm <- mod_gcm$sample(
+  data = data_simple,
+  seed = 120,
+  refresh = 500,
+  chains = 2,
+  parallel_chains = 2,
+  threads_per_chain = 2,
+  iter_warmup = 1000,
+  iter_sampling = 2000,
+  max_treedepth = 20,
+  adapt_delta = 0.99
+)
+simple_sum <- samples_simple$summary()
+draws_df_simple <- as_draws_df(samples_simple$draws())
 
 ```
 
