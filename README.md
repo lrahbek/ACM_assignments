@@ -5,7 +5,7 @@ The project is completed by study group 2:
 - Astrid Østergaard Iversen (au689496@edu.au.dk)
 - Cassandra Lyn Rempel (201807186@post.au.dk)
 - Laura Rahbek (202106182@post.au.dk)
-- Sofie Mosegaard (202106512@post.au.dk)
+- Sofie Mosegaard (sofie.mosegaard@cas.au.dk)
 
 
 ## Repo overview
