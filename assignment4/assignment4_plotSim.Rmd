@@ -632,23 +632,6 @@ ggplot(plot_df_w1, aes(x = value, fill = source)) +
   )
 ggsave(filename = "figs/hist2.png", width = 7, height = 5, dpi = 300)
 
-##Scatter of true vs estimated feature 1
-ggplot(agent_estimates, aes(x = true_w1, y = est_w1)) +
-  geom_jitter(width = 0.01, height = 0.01, size = 2, alpha = 0.7) +
-  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red") +
-  labs(title = "True vs Estimated Attention to Feature 1",
-       x = "True w[1]", y = "Estimated w[1]") +
-  theme_minimal()
-ggsave(filename = "figs/scatterT_Est.png", width = 7, height = 5, dpi = 300)
-
-##Scatter of estimated c per agent
-ggplot(agent_estimates, aes(x = agent, y = est_c)) +
-  geom_point(size = 2) +
-  geom_hline(yintercept = 1.5, linetype = "dashed") +
-  labs(title = "Estimated c per Agent", y = "Estimated c", x = "Agent ID") +
-  theme_classic()
-ggsave(filename = "figs/estSim.png", width = 7, height = 5, dpi = 300)
-
 ```
 
 #Across Features Attentional Weights
@@ -673,7 +656,6 @@ ggplot(agent_feature_estimates, aes(x = est_w, fill = feature_label)) +
        x = "Estimated Attention Weight", y = "Density", fill = "Feature") +
   theme_minimal()
 ggsave(filename = "figs/across_feat.png", width = 7, height = 5, dpi = 300)
-
 
 ```
 # FIT & CHECK STAN ON EMPERICAL DATA
