@@ -499,7 +499,74 @@ load("data/sim_data_fit.RData")
 ## Fit the STAN Model (Empirical Data)
 ```{r}
 
+# unique stimuli from empirical data
+emp_stim_df <- unique(emp_data[c("dangerous", "eyes", "legs", "spots", "arms", "color")])
+emp_stim_df$id <- seq(1:nrow(emp_stim_df))
+
+emp_data <- left_join(emp_data,
+                      emp_stim_df, 
+                      by = join_by("dangerous", "eyes", "legs", "spots", "arms", "color")) 
+
+# observation matrix
+emp_obs <- as.matrix(pivot_wider(emp_data[c("id", "subject", "trial")],
+                                 names_from = trial, values_from = id)[-1])
+
+# choice matrix
+emp_choice <- as.matrix(pivot_wider(emp_data[c("correct", "subject", "trial")],
+                                    names_from = trial, values_from = correct)[-1])
+
+# stimuli feature matrix
+emp_stim <- as.matrix(emp_stim_df[c("eyes", "legs", "spots", "arms", "color")])
+
+# create STAN data list
+emp_data_ls <- list(
+  nagents = length(unique(emp_data$subject)),
+  n_trials = max(emp_data$trial), 
+  nfeatures = 5,                     
+  nstim = nrow(emp_stim_df),                        
+  b = 0.5,                        
+  stimuli = emp_stim,
+  obs = emp_obs,          
+  cat_danger = emp_stim_df$dangerous,
+  choice = emp_choice,
+  w_prior_values = c(1, 1, 1, 1, 1),  # priors for w 
+  c_prior_values = c(0, 1))           # priors for c
+
 ```
+
+```{r}
+
+emp_file_gcm <- file.path("stan/gcm.stan")
+emp_mod_gcm <- cmdstan_model(emp_file_gcm, cpp_options = list(stan_threads = TRUE))
+
+emp_samples_gcm <- emp_mod_gcm$sample(
+  data = emp_data_ls,
+  seed = 10,
+  refresh = 100,
+  chains = 2,
+  parallel_chains = 2,
+  threads_per_chain = 1,
+  iter_warmup = 500,
+  iter_sampling = 1000,
+  max_treedepth = 20,
+  adapt_delta = 0.99)
+```
+
+```{r}
+emp_gcm_sum <- emp_samples_gcm$summary()
+emp_draws_df_gcm <- as_draws_df(emp_samples_gcm$draws())
+```
+
+## Save Data
+```{r}
+# Save emp_gcm_sum and emp_draws_df_gcm as RData
+save(emp_gcm_sum, emp_draws_df_gcm, emp_data_ls, file = "data/emp_data_fit.RData")
+
+# Load data 
+load("data/emp_data_fit.RData")
+```
+
+
 
 ## Model Quality Checks (Empirical Data)
 ```{r}
