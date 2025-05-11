@@ -30,10 +30,10 @@ emp_data <- emp_data[emp_data$session == 1 &     # incl only session 1
                        emp_data$test == 0,]      # remove test rows
 # remove columns not used
 emp_data <- emp_data %>% 
-  select(-c(condition, session, test, nutricious, RT, motivation, 
+  select(-c(condition, session, test, nutricious, RT, motivation, # remove none needed columns
             competence, communication, complement)) %>% 
-  group_by(subject) %>% 
-  mutate(performance = cumsum(correct) / seq_along(correct))
+  group_by(subject) %>%                                           # group the data frame by subjects
+  mutate(performance = cumsum(correct) / seq_along(correct))      # create a performance column 
 ```
 
 ## Expand Features
@@ -55,10 +55,11 @@ emp_data <- emp_data %>%
 ### Cumulative Scores and Performance for each Participant 
 Calculate mean cumulative value per trial and plot it along each subjects
 ```{r}
+# Calculate mean cumulative and performance for each trial
 mean_emp <- emp_data %>% 
   group_by(trial) %>% 
   summarise(mean_cum = mean(cumulative)/100, mean_perf = mean(performance))
-
+# Plot the cumulative scores
 p1 <- ggplot()+
   geom_line(data = emp_data, aes(group = subject, x = trial, y = cumulative/100), 
             color = "grey")+
@@ -69,7 +70,7 @@ p1 <- ggplot()+
   ggtitle("Emperical Data Cumulative Score")+
   labs(y = "cumulative")+
   theme_minimal()
-
+# Plot the performance 
 p2 <- ggplot(emp_data)+
   geom_line(aes(x = trial, y = performance), color = "grey")+
   geom_line(data = mean_emp, aes(x = trial, y = mean_perf), color = "green4")+
@@ -79,15 +80,15 @@ p2 <- ggplot(emp_data)+
   ggtitle("Emperical Data Performance")+
   theme_minimal()
 p1/p2
-ggsave(filename = "figs/emperical_data_performance.png")
+ggsave(filename = "figs/emperical_data_performance.png") #save in figs folder
 ```
 
 ### Percentage of Correct Categorisation per Stimuli
 ```{r}
+# Calculate summary stats for each stimuli 
 emp_data_sum <- pivot_wider(
   emp_data[c("stimulus", "correct", "dangerous", "cycle")], 
   names_from = correct, values_from = correct, values_fn = length, values_fill = 0)
-
 colnames(emp_data_sum) <- c("stimuli", "danger", "cycle", "wrong", "correct")
 emp_data_sum$stimuli <- str_split_fixed(emp_data_sum$stimuli, 
                                         pattern = ".jpg", n = 2)[,1]
@@ -98,9 +99,7 @@ emp_data_sum <- emp_data_sum %>%
   mutate(n = (wrong+correct)) %>% 
   mutate(perc_corr = (correct/n)*100) %>% 
   mutate_at(c("stimuli", "cycle"), as.factor)
-```
-
-```{r}
+# Plot it
 ggplot(emp_data_sum) +
   geom_point(aes(x = cycle, y = stimuli,  size = perc_corr, fill = perc_corr), 
                alpha=0.7, shape = 21, position = position_jitter(width = 0.15)) + 
@@ -109,10 +108,10 @@ ggplot(emp_data_sum) +
                         breaks = c(25, 50, 75, 100), guide = "legend")+
   theme_minimal()+ 
   facet_grid(row = "danger", scales = "free_y", space = "free_y", labeller = label_both)+
-  theme(panel.grid = element_blank(), 
-        panel.spacing = unit(1.5, "lines"))+ 
+  theme(panel.grid = element_blank(), panel.spacing = unit(1.5, "lines"))+ 
   coord_cartesian(clip = "off")
 ```
+
 
 # FUNCTIONS 
 ## Experiment Function
@@ -176,6 +175,7 @@ distance <- function(vect1, vect2, w) {
 similarity <- function(distance, c) {
   return(exp(-c * distance))
 }
+
 ```
 
 ### Agent Functions 
@@ -213,24 +213,26 @@ gcm_agent <- function(w, c, obs, cat_list){
 # SIMULATION
 ## Simulate Agents
 ```{r}
-#different weight dists
+# Define three sets of weights for the features to test
 weights <- list("even" = softmax(rep(1, 5)),                 # 0.2 0.2 0.2 0.2 0.2
                 "eyes_spots" = softmax(c(1.8, 1, 1.8, 1, 1)),# 0.299 0.134 0.299 0.134 0.134
                 "color_arms" = softmax(c(1, 1, 1, 1.8, 1.8)))# 0.134 0.134 0.134 0.299 0.299
-c <- 1.5                # sensitivity paramater 
-cycles <- 3             # number of times stimuli is repeated
 
-n_agents <- 10*length(weights)  # number of agents to be simulated: 10 with each of the weight dists 
+c <- 1.5                           # sensitivity parameter (same for all agents)
+cycles <- 3                        # number of times stimuli is repeated
+n_subA <- 10                       # number of agents per weight dists 
+n_agents <- n_subA*length(weights) # total number of agents to be simulated: 10 with each of the weight dists 
 
-# define unique stimuli: 
-stim <- unique(str_split_fixed(emp_data$stimulus, pattern = ".jpg", n = 2)[,1]) 
-d_features <- c("eyes", "spots") #the features that with d_vals indicate danger
-d_vals <- c(1, 1)                #the values of d_features for them to indicate danger
+stim <- unique(str_split_fixed(emp_data$stimulus, pattern = ".jpg", n = 2)[,1]) # define unique stimuli
 
+d_features <- c("eyes", "spots") # the features that with d_vals indicate danger
+d_vals <- c(1, 1)                # the values of d_features for them to indicate danger
+
+# Simulate n_agents with the given parameters: 
 
 for (j in 1:length(weights)){
   w <- weights[[j]] # vector of weights for each feature
-  for(i in (j*10-9):(j*10)){ #go through ten agents for each weight vect (1: 1-10, 2: 11-20, 3: 21-30)
+  for(i in (j*n_subA-(n_subA-1)):(j*n_subA)){ #go through ten agents for each weight vect (1: 1-10, 2: 11-20, 3: 21-30)
     # create exp data frame and unique stim order for given agent: 
     exp_df <- experiment(agent_id = i, w = names(weights)[j], c = c, 
                          stimuli = stim , cycles = cycles, danger_fun = "ADD",
@@ -250,45 +252,40 @@ for (j in 1:length(weights)){
       sim_data <- rbind(sim_data, exp_df)
     }
   }
-  if (j == 1){
-    sim_data_w <- sim_data
-  }
-  else{
-    sim_data_w <- rbind(sim_data_w, sim_data)
-  }
-  cat("Finished simulating", n_agents, "agents with w of", w, "\n")
+  cat("Finished simulating", n_agents/length(weights), "agents with w of", w, "\n")
 }
 ```
+## Plot Agents 
 
-## Plot Performance and Cumulative Score of Simulation
+### Plot Performance and Cumulative Score of Simulation
 ```{r}
-mean_sim <- sim_data_w %>% 
+mean_sim <- sim_data %>% 
   group_by(w, trial) %>%   
   summarise(mean_cum = mean(cumulative), mean_perf = mean(performance))
 
 ggplot()+
-  geom_line(data = sim_data_w, aes(x = trial, y = cumulative),color = "grey")+
+  geom_line(data = sim_data, aes(x = trial, y = cumulative),color = "grey")+
   geom_line(data = mean_sim, aes(x = trial, y = mean_cum, color = w), show.legend = F)+
   scale_color_viridis_d()+
-  ggtitle("Simulation Cumulative Score (c: 1)")+
+  ggtitle("Simulation Cumulative Score (c: 1.5)")+
   facet_wrap(~w, labeller = label_both)+
   theme_minimal()
 ggsave(filename = "figs/sim_cumulative.png")
 
 ggplot()+
-  geom_line(data = sim_data_w, aes(x = trial, y = performance), color = "grey")+
+  geom_line(data = sim_data, aes(x = trial, y = performance), color = "grey")+
   geom_line(data = mean_sim, aes(x = trial, y = mean_perf, color = w), show.legend = F)+
   scale_color_viridis_d()+
-  ggtitle("Simulation Performance (c: 1)")+
+  ggtitle("Simulation Performance (c: 1.5)")+
   facet_wrap(~w, labeller = label_both)+
   theme_minimal()
 ggsave(filename = "figs/sim_performance.png")
 ```
 
-## Percentage of Correct Categorisation per Stimuli Plot 
+### Percentage of Correct Categorisation per Stimuli Plot 
 ```{r}
 ## calculate percent correct categorisations
-sim_data_sum <- pivot_wider(sim_data_w[c("w", "stimuli", "correct", "danger", "cycle")], 
+sim_data_sum <- pivot_wider(sim_data[c("w", "stimuli", "correct", "danger", "cycle")], 
                             names_from = correct, values_from = correct, values_fn = length, 
                             values_fill = 0)
 colnames(sim_data_sum) <- c("w", "stimuli", "danger", "cycle", "wrong", "correct")
@@ -296,9 +293,7 @@ sim_data_sum <- sim_data_sum %>%
   group_by(w, cycle, stimuli) %>% 
   mutate(perc_corr = (correct/(wrong+correct))*100) %>% 
   mutate_at( "cycle", as.factor)
-```
 
-```{r}
 ggplot(sim_data_sum) +
   geom_point(aes(x = cycle, y = stimuli,  size = perc_corr, fill = perc_corr), 
                alpha=0.7, shape = 21, position = position_jitter(width = 0.25)) + 
@@ -315,38 +310,145 @@ ggplot(sim_data_sum) +
 
 
 
+
+
 ## Save in STAN-friendly Format
 ```{r}
 # unique stimuli and category df with stimuli ids : 
-stim_df <- unique(sim_data_w[c("danger", "eyes", "legs", "spots", "arms", "color")])
+stim_df <- unique(sim_data[c("danger", "eyes", "legs", "spots", "arms", "color")])
 stim_df$s_id <- seq(1:nrow(stim_df))
-#combine stim_df with ids and simulated df 
-sim_data_w <- left_join(sim_data_w, stim_df)
+sim_data <- left_join(sim_data, stim_df, #combine stim_df with ids and simulated df 
+                      by = join_by("danger", "eyes", "legs", "spots", "arms", "color")) 
 
-sim_data <- list(
-  total_N = nrow(sim_data_w),                    # total number of observations (all agents)
-  nagents = length(unique(sim_data_w$agent_id)), # number of individual agents
-  agent_id = sim_data_w$agent_id,                # agent id for each observation
-  n_trials = 96,                                 # number of trials for each agent 
-  nfeatures = 5,                                 # number of features for stimuli
-  nstim = 32,                                    # number of unique stimuli
-  stimuli = as.matrix(stim_df[c(
-  "eyes", "legs", "spots", "arms", "color")]),   # matrix of [nstim, nfeatures] indices: s_id
-  cat_danger = stim_df$danger,                   # array of cats with indices as s_id
-  obs = sim_data_w$s_id,                         # array of stim id of length total_N
-  b = 0.5,                                       # bias for selecting one cat over the other
-  choice = sim_data_w$a_choices                  # array of choice for each trial 
+# observation matrix [nagents, ntrials] each value is the id for the observed stimuli
+obs <- as.matrix(pivot_wider(sim_data[c("s_id", "agent_id", "trial")],
+                             names_from = trial, values_from = s_id)[-1])
+# choice matrix [nagents, ntrials] each value is the category assigned to the observed stimuli
+choice <- as.matrix(pivot_wider(sim_data[c("a_choices", "agent_id", "trial")],
+                             names_from = trial, values_from = a_choices)[-1])
+# stimuli matrix [nstim, nfeatures] 
+stimuli <- as.matrix(stim_df[c("eyes", "legs", "spots", "arms", "color")])
+
+sim_data_ls <- list(
+  nagents = n_agents,                # number of individual agents
+  n_trials = 96,                     # number of trials for each agent 
+  nfeatures = 5,                     # number of features for stimuli
+  nstim = 32,                        # number of unique stimuli
+  b = 0.5,                           # bias for selecting one cat over the other
+  stimuli = stimuli,                 # matrix of [nstim, nfeatures] indices: s_id
+  obs = obs,                         # matrix[nagents, ntrials] with obs
+  cat_danger = stim_df$danger,       # array of cats with indices as s_id
+  choice = choice,                   # matrix with choices [nagents, ntrials]
+  w_prior_values = c(1, 1, 1, 1, 1), # priors for w
+  c_prior_values = c(0, 1)           # priors for c
 )
 
 ```
 
 
-
-
-
 # STAN MODEL
 
 ```{r}
+stan_gcm <- "
+data{
+  int<lower=1> nagents;                                   // number of agents
+  int<lower=1> n_trials;                                  // number of trials 
+  int<lower=1> nfeatures;                                 // number of features in each stimuli
+  int<lower=1> nstim;                                     // number of unique stimuli
+  real<lower=0, upper=1> b;                               // bias for selecting cat 'danger' (1)
+  array[nstim, nfeatures] int<lower=0, upper=1> stimuli;  // features of each stimuli
+  array[nagents, n_trials] int<lower=1, upper=32> obs;    // observations (s_id) for each agent+trial
+  vector<lower=0, upper=1>[nstim] cat_danger;             // vector of categories for each unique stimuli
+  array[nagents, n_trials] int<lower=0, upper=1> choice;  // agent-choice on each trial 
+  
+  // priors
+  vector[nfeatures] w_prior_values;                       // priors for param w
+  array[2] real c_prior_values;                           // mean and sd for logit-normal dist (param c)
+}
+parameters{
+  row_stochastic_matrix[nagents, nfeatures] w;            // w param (each row is a simplex)
+  vector[nagents] logit_c;                                // c param for each agent
+}
+
+transformed parameters{
+
+  // Parameter c: inverse logit transformed 
+  vector <lower=0, upper=2>[nagents] c = inv_logit(logit_c)*2;
+  
+  // Parameter r (probability of response = 1 ) 
+  array[nagents, n_trials] real<lower=0.0001, upper=0.9999> r;
+  array[nagents, n_trials] real rr; 
+
+  for (a in 1:nagents){                     // Loop through each agent 
+  	for (i in 1:n_trials){                  // Loop through each trial
+  	
+  		vector[(i-1)]  exemp_similarities;    // Vector of similarities between current obs and previous obs
+  		
+  		for (e in 1:(i-1)){                   // Loop through previous aliens
+  			array[nfeatures] real tmp_distance; // Array of distances for each feature for previous alien e
+  			
+  			for (j in 1:nfeatures){             // Loop through each feature in alien e and calculate distances
+  			  tmp_distance[j] = w[a,j]*abs(stimuli[obs[a, e], j] -  stimuli[obs[a, i], j] );
+  			}
+  			
+  			// Calculate similarity between current alien and alien e:
+  			exemp_similarities[e] = exp(-c[a] * sum(tmp_distance));
+  		}
+  		
+  	  // If first trial or category is new, make r random: 	
+      if (i == 1 || sum(cat_danger[obs[a, 1:(i-1)]]) == 0 || sum(cat_danger[obs[a, 1:(i-1)]]) == (i-1)){
+        r[a, i] = 0.5;
+      }
+      
+      // Otherwise calculate summed similarities (per category):
+      else{
+        array[2] real similarities; 
+        
+        vector[(i-1)] ind_danger = cat_danger[obs[a, 1:(i-1)]];      // vector of inds of dangerous stim
+        vector[(i-1)] ind_safe = abs(cat_danger[obs[a, 1:(i-1)]]-1); // vector of inds of safe stim
+
+        
+        similarities[1] = sum(ind_danger.*exemp_similarities);       // sum of cat = 1
+        similarities[2] = sum(ind_safe.*exemp_similarities);         // sum of cat = 0
+
+        // Calculate probability of choosing 1:
+        rr[a, i] = (b*similarities[1]) / (b*similarities[1] + (1-b)*similarities[2]);
+
+        // (make sampling work)
+        if (rr[a, i] > 0.9999){
+          r[a, i] = 0.9999;
+        } else if (rr[a, i] < 0.0001){
+            r[a, i] = 0.0001;
+        } else if (rr[a, i] > 0.0001 && rr[a, i] < 0.9999){
+            r[a, i] = rr[a, i];
+        } else{
+            r[a, i] = 0.5;
+        }
+      }
+  	}
+  }
+}
+
+model {
+  // Priors
+  for (a in 1:nagents){
+    target += dirichlet_lpdf(w[a,] | w_prior_values);
+    target += normal_lpdf(logit_c[a] | c_prior_values[1], c_prior_values[2]);
+  }
+  // Liklihood
+  
+  for (a in 1:nagents){
+    target += bernoulli_lpmf(choice[a, ] | r[a, ]);
+  }
+}
+
+"
+# Write the model to a file
+write_stan_file(
+  stan_gcm,
+  dir = "stan/",
+  basename = "gcm.stan"
+)
 
 ```
 
@@ -355,8 +457,36 @@ sim_data <- list(
 
 ## Fit the STAN Model (Simulated Data)
 ```{r}
+file_gcm <- file.path("stan/gcm.stan")
+mod_gcm <- cmdstan_model(file_gcm, 
+                         cpp_options = list(stan_threads = TRUE))
 
+samples_gcm <- mod_gcm$sample(
+  data = sim_data_ls,
+  seed = 10,
+  refresh = 100,
+  chains = 2,
+  parallel_chains = 2,
+  threads_per_chain = 1,
+  iter_warmup = 500,
+  iter_sampling = 1000,
+  max_treedepth = 20,
+  adapt_delta = 0.99
+)
+
+
+gcm_sum <- samples_gcm$summary()
+draws_df_gcm <- as_draws_df(samples_gcm$draws())
 ```
+
+## Save Data
+```{r}
+## Save gcm_sum and draws_df_gcm as RData
+save(gcm_sum, draws_df_gcm, sim_data_ls, file = "data/sim_data_fit.RData")
+## Load data 
+load("data/sim_data_fit.RData")
+```
+
 
 ## Model Quality Checks (Simulated Data)
 ```{r}
