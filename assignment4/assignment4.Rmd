@@ -15,8 +15,8 @@ pacman::p_load(tidyverse, here, posterior, cmdstanr, brms, tidybayes, rstan,
                ggplot2, dplyr, patchwork)
 ```
 
-# EMPERICAL DATA
-## Load Emperical Data and Clean it
+# EMPIRICAL DATA
+## Load Empirical Data and Clean it
 Data used contains: 
 - *The 'dangerous' category* (not 'nutrisious')
 - *Condition 1* dyads (not condition 2)
@@ -51,7 +51,7 @@ emp_data <- emp_data %>%
   mutate_at(c("eyes", "legs", "spots", "arms", "color"), as.integer)
 ```
 
-## Plot the Emperical Data
+## Plot the Empirical Data
 ### Cumulative Scores and Performance for each Participant 
 Calculate mean cumulative value per trial and plot it along each subjects
 ```{r}
@@ -67,7 +67,7 @@ p1 <- ggplot()+
   annotate(geom="text", x= nrow(mean_emp)+4, 
            y= mean_emp$mean_cum[mean_emp$trial == nrow(mean_emp)], 
            label="Mean", color = "purple3", size = 3) +
-  ggtitle("Emperical Data Cumulative Score")+
+  ggtitle("Empirical Data Cumulative Score")+
   labs(y = "cumulative")+
   theme_minimal()
 # Plot the performance 
@@ -77,10 +77,10 @@ p2 <- ggplot(emp_data)+
   annotate(geom="text", x= nrow(mean_emp)+4, 
            y= mean_emp$mean_perf[mean_emp$trial == nrow(mean_emp)], 
            label="Mean", color = "green4", size = 3) +
-  ggtitle("Emperical Data Performance")+
+  ggtitle("Empirical Data Performance")+
   theme_minimal()
 p1/p2
-ggsave(filename = "figs/emperical_data_performance.png") #save in figs folder
+ggsave(filename = "figs/empirical_data_performance.png") #save in figs folder
 ```
 
 ### Percentage of Correct Categorisation per Stimuli
@@ -494,14 +494,14 @@ load("data/sim_data_fit.RData")
 ```
 
 
-# FIT & CHECK STAN ON EMPERICAL DATA
+# FIT & CHECK STAN ON EMPIRICAL DATA
 
-## Fit the STAN Model (Emperical Data)
+## Fit the STAN Model (Empirical Data)
 ```{r}
 
 ```
 
-## Model Quality Checks (Emperical Data)
+## Model Quality Checks (Empirical Data)
 ```{r}
 
 ```
