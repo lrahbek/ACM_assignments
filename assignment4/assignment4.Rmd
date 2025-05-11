@@ -567,15 +567,28 @@ load("data/emp_data_fit.RData")
 ```
 
 
-
 ## Model Quality Checks (Empirical Data)
+### Convergence Checks
 ```{r}
 
+cat("Convergence checks for GSM model on empirical data \n")
+gcm_rhat_issues <- emp_gcm_sum %>% 
+  filter(rhat > 1.05) %>% 
+  nrow()
+cat("Empirical GCM model parameters with Rhat > 1.05:", 
+    gcm_rhat_issues, "out of", nrow(emp_gcm_sum), "\n")
 ```
 
+### Markov Chains
 
 
-
+```{r}
+ggplot(draws_df_simple, aes(.iteration, alpha_prior, group = .chain, color = .chain)) +
+  geom_line() +
+  ggtitle("Simple Model: Alpha Prior")+
+  theme_classic()
+ggsave("figs/markov_chains_simple_alpha_prior.png")
+```
 
 
 
