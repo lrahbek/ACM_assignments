@@ -537,7 +537,6 @@ draws_long <- draws %>%
   pivot_longer(cols = -c(.iteration, .chain),
                names_to = "parameter", values_to = "value")
 
-
 ##Plot using facet_wrap
 ggplot(draws_long, aes(x = .iteration, y = value, group = .chain, color = .chain)) +
   geom_line(alpha = 0.5) +
@@ -566,7 +565,8 @@ avg_w_prior <- rowMeans(prior_matrix)             # average across 5 features
 plot_df <- bind_rows(
   tibble(value = avg_w_posterior$value, source = "Posterior"),
   tibble(value = avg_w_prior, source = "Prior")
-)
+) %>%
+  mutate(source = factor(source, levels = c("Prior", "Posterior")))
 
 ggplot(plot_df, aes(x = value, fill = source)) +
   geom_histogram(alpha = 0.4, position = "identity", bins = 30) +
@@ -574,7 +574,10 @@ ggplot(plot_df, aes(x = value, fill = source)) +
   labs(title = "Posterior vs Prior (Average Attention Across Features)",
        x = "Average Attention Weight", y = "Count") +
   scale_fill_manual(values = c("Posterior" = "lightblue", "Prior" = "pink")) +
-  theme_bw()
+  theme_bw() +
+  theme(legend.position = "right",  # or "bottom"
+        legend.title = element_blank(),
+        legend.text = element_text(size = 10))
 ggsave(filename = "figs/hist_avg_w.png", width = 7, height = 5, dpi = 300)
 
 #Compute posterior means
@@ -586,32 +589,47 @@ agent_estimates <- tibble(
 )
 
 ##Histogram of c (sensitivity) across agents vs prior
-#posterior blue and prior pink
-draws_c_all <- draws %>%
-  select(all_of(c_cols)) %>%
-  pivot_longer(cols = everything(), names_to = "param", values_to = "value") %>%
-  mutate(c_prior = rnorm(n(), 1, 1))
+# Format for plotting
+plot_df_c <- draws_c_all %>%
+  select(value, c_prior) %>%
+  pivot_longer(cols = everything(), names_to = "source", values_to = "value") %>%
+  mutate(source = recode(source, value = "Posterior", c_prior = "Prior"),
+         source = factor(source, levels = c("Prior", "Posterior")))  # FORCE factor levels
 
-ggplot(draws_c_all) +
-  geom_histogram(aes(x = value), fill = "lightblue", alpha = 0.6, bins = 30) +
-  geom_histogram(aes(x = c_prior), fill = "pink", alpha = 0.3, bins = 30) +
+# Plot with legend
+ggplot(plot_df_c, aes(x = value, fill = source)) +
+  geom_histogram(alpha = 0.4, position = "identity", bins = 30) +
   geom_vline(xintercept = 1.5, linetype = "dashed", color = "black") +
-  labs(title = "Posterior vs Prior (All agents): Sensitivity Parameter", x = "c", y = "Count") +
-  theme_bw()
-ggsave(filename = "figs/hist1.png", width = 7, height = 5, dpi = 300)
+  labs(title = "Posterior vs Prior (All agents): Sensitivity Parameter",
+       x = "c", y = "Count", fill = "Distribution") +  # Optional: set legend title
+  scale_fill_manual(values = c("Posterior" = "lightblue", "Prior" = "pink")) +
+  theme_bw() +
+  theme(
+    legend.position = "right",
+    legend.title = element_blank(),  # or set your preferred title above
+    legend.text = element_text(size = 10)
+  )
 
-##Histogram of feature 1 across agents vs prior
-draws_w1_all <- draws %>%
-  select(all_of(w1_cols)) %>%
-  pivot_longer(cols = everything(), names_to = "param", values_to = "value") %>%
-  mutate(w_prior = rdirichlet(n(), rep(1, 5))[,1])
+#Long format dataframe
+plot_df_w1 <- draws_w1_all %>%
+  select(value, w_prior) %>%
+  pivot_longer(cols = everything(), names_to = "source", values_to = "value") %>%
+  mutate(
+    source = recode(source, value = "Posterior", w_prior = "Prior"),
+    source = factor(source, levels = c("Prior", "Posterior"))
+  )
 
-ggplot(draws_w1_all) +
-  geom_histogram(aes(x = value), fill = "lightblue", alpha = 0.6, bins = 30) +
-  geom_histogram(aes(x = w_prior), fill = "pink", alpha = 0.3, bins = 30) +
+ggplot(plot_df_w1, aes(x = value, fill = source)) +
+  geom_histogram(alpha = 0.4, position = "identity", bins = 30) +
   geom_vline(xintercept = 0.2, linetype = "dashed", color = "black") +
   labs(title = "Posterior vs Prior (All agents): Attention Weights", x = "w[1]", y = "Count") +
-  theme_bw()
+  scale_fill_manual(values = c("Posterior" = "lightblue", "Prior" = "pink")) +
+  theme_bw() +
+  theme(
+    legend.position = "right",
+    legend.title = element_blank(),
+    legend.text = element_text(size = 10)
+  )
 ggsave(filename = "figs/hist2.png", width = 7, height = 5, dpi = 300)
 
 ##Scatter of true vs estimated feature 1
