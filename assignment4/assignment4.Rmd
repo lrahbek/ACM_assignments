@@ -474,64 +474,56 @@ samples_gcm <- mod_gcm$sample(
   adapt_delta = 0.99
 )
 
+sim_gcm_sum <- samples_gcm$summary()
+sim_draws_df_gcm <- as_draws_df(samples_gcm$draws())
 
-gcm_sum <- samples_gcm$summary()
-draws_df_gcm <- as_draws_df(samples_gcm$draws())
-```
-
-## Save Data
-```{r}
+##save data
 ## Save gcm_sum and draws_df_gcm as RData
-save(gcm_sum, draws_df_gcm, sim_data_ls, file = "data/sim_data_fit.RData")
+save(sim_gcm_sum, sim_draws_df_gcm, sim_data_ls, file = "data/sim_data_fit.RData")
 ## Load data 
 load("data/sim_data_fit.RData")
 ```
 
-
 ## Model Quality Checks (Simulated Data)
-
 ### Convergence Checks
 ```{r}
-cat("Convergence checks for GSM model on simulated data \n")
-gcm_rhat_issues <- gcm_sum %>% 
+cat("Convergence checks for GCM model on simulated data \n")
+gcm_rhat_issues <- sim_gcm_sum %>% 
   filter(rhat > 1.05) %>% 
   nrow()
 cat("Empirical GCM model parameters with Rhat > 1.05:", 
-    gcm_rhat_issues, "out of", nrow(gcm_sum), "\n")
+    gcm_rhat_issues, "out of", nrow(sim_gcm_sum), "\n")
 ```
 
-### Markov Chains - Traceplots
+### Markov Chains - Traceplots: Attention Weights
 ```{r}
-# ATTENTION WEIGHTS 
-#reformat draws data frame to plot trace plots
-w_cols <- grep("^w\\[", colnames(draws_df_gcm), value = TRUE)
+#define cols: 
+w_cols_sim <- grep("^w\\[", colnames(sim_draws_df_gcm), value = TRUE)
 
-draws_w_all <- draws_df_gcm %>%
+sim_draws_df_gcm %>%
   select(.iteration, .chain, all_of(w_cols)) %>%
   pivot_longer(cols = starts_with("w["), names_to = "param", values_to = "value") %>%
   separate(param, into = c("w", "agent", "feature"), sep = "\\[|,|\\]", convert = TRUE) %>%
-  select(-w)
-draws_w_all$w_id <- ifelse(draws_w_all$agent %in% seq(1, 10), "even",
-                            ifelse(draws_w_all$agent %in% seq(11, 20), "eyes_spots", 
-                            ifelse(draws_w_all$agent %in% seq(21, 30), "color_arms", NA)))
-draws_w_all$w_id <- as.factor(draws_w_all$w_id)
-
-#Average over agents for each iteration/feature
-avg_trace <- draws_w_all %>%
+  select(-w) %>% 
+  mutate(w_id = case_when(agent %in%seq(1,10) ~ "even", 
+                          agent %in% seq(11,20) ~ "eyes_spots", 
+                          agent %in% seq(21,30) ~ "color_arms")) %>% 
+  mutate_at("w_id", as.factor) %>% 
   group_by(.iteration, .chain, w_id, feature) %>%
-  summarise(mean_value = mean(value), .groups = "drop")
-
-#Plot traceplots of average attention per feature
-ggplot(avg_trace, aes(x = .iteration, y = mean_value,  color = .chain)) +
+  summarise(mean_value = mean(value), .groups = "drop") %>% 
+  ggplot(aes(x = .iteration, y = mean_value,  color = .chain)) +
   geom_line(alpha = 0.6) +
   facet_grid(rows = vars(feature), cols = vars(w_id), 
-              labeller = labeller(feature = c(`1` = "Eyes", `2` = "Legs", `3` = "Spots", `4` = "Arms", `5` = "Color")))+
+              labeller = labeller(
+                feature = c(`1` = "Eyes", `2` = "Legs", `3` = "Spots", `4` = "Arms", `5` = "Color")))+
   ggtitle("Traceplots: Average W per Feature and Weight-ID")+
   theme_minimal()
-ggsave(filename = "figs/traceplots_average_w.png", width = 10)
+ggsave(filename = "figs/traceplot_w_sim.png", width = 10)
+```
 
-# SENSITIVITY PARAMETER (c)
-c_cols <- grep("^c\\[", colnames(draws_df_gcm), value = TRUE)
+### Markov Chains - Traceplots: Sensitivity Parameter
+```{r}
+c_cols_sim <- grep("^c\\[", colnames(sim_draws_df_gcm), value = TRUE)
 
 draws_df_gcm %>% 
   select(.iteration, .chain, all_of(c_cols)) %>% 
@@ -542,35 +534,35 @@ draws_df_gcm %>%
   geom_line(alpha = 0.5) +
   ggtitle("Traceplot: Average Sentivity Parameter (c)")+
   theme_minimal()
-ggsave(filename = "figs/traceplots_average_c.png", width = 10)
+ggsave(filename = "figs/traceplots_c_sim.png", width = 10)
 ```
 
-### Recovery of True Values: Attention Weights
+### Recovery of True Values (Results): Attention Weights
 ```{r}
-# Reformat Weights for 'recovery' plots
-w_summary <- gcm_sum[gcm_sum$variable %in% w_cols,]
-w_summary <- w_summary %>% 
+#reformat data
+sim_w_sum <- sim_gcm_sum %>% 
+  filter(variable %in% w_cols_sim) %>% 
   select(c("variable", "mean")) %>% 
-  separate(variable, into = c("w", "agent", "feature"), sep = "\\[|,|\\]", convert = TRUE)
-w_summary$w_id <- ifelse(w_summary$agent %in% seq(1, 10), "even",
-                            ifelse(w_summary$agent %in% seq(11, 20), "eyes_spots", 
-                            ifelse(w_summary$agent %in% seq(21, 30), "color_arms", NA)))
-w_summary$w_id <- as.factor(w_summary$w_id)
-
+  separate(variable, into = c("w", "agent", "feature"), sep = "\\[|,|\\]", convert = TRUE) %>% 
+  mutate(w_id = case_when(agent %in%seq(1,10) ~ "even", 
+                            agent %in% seq(11,20) ~ "eyes_spots", 
+                            agent %in% seq(21,30) ~ "color_arms")) %>% 
+  select(-w) %>% 
+  mutate_at("w_id", as.factor)  
+#create data frame with true w values and combine with sim_w_sum
 true_w_df <- data.frame(w_id = c(rep("even", 5), rep("eyes_spots", 5), rep("color_arms", 5)),
                         feature = rep(seq(1,5), 3),
                         true_w = c(rep(0.2, 5), softmax(c(1.8, 1, 1.8, 1, 1)), softmax(c(1, 1, 1, 1.8, 1.8))))
+sim_w_sum <- left_join(sim_w_sum, true_w_df, by = c("w_id", "feature"))
 
-w_summary <- left_join(w_summary, true_w_df, by = c("w_id", "feature"))
-
-ggplot(w_summary)+
+ggplot(sim_w_sum)+
   geom_point(aes(x = true_w, y = mean))+
   geom_point(aes(y = true_w, x = true_w), colour = "red")+
   lims(x = c(0,0.5), y = c(0,0.5))+
-  labs(xlab("est_w"))+
+  ylab("mean est w")+
   ggtitle("Mean Estimated weight per Agent", subtitle = "Red dots indicate true w values")+
-  facet_grid(cols = vars(w_id), rows = vars(feature), 
-             labeller = labeller(feature = c(`1` = "Eyes", `2` = "Legs", `3` = "Spots", `4` = "Arms", `5` = "Color")))+
+  facet_grid(cols = vars(w_id), rows = vars(feature), labeller = labeller(
+    feature = c(`1` = "Eyes", `2` = "Legs", `3` = "Spots", `4` = "Arms", `5` = "Color")))+
   theme_minimal()
 ggsave(filename = "figs/recov_w.png")
 ```
@@ -677,8 +669,7 @@ ggsave("figs/prior_post_w_a21.png")
 
 ### Prior-Posterior Update Checks: Sensitivity Parameter (c)
 ```{r}
-#reformat data
-draws_c_sim <- draws_df_gcm %>% 
+draws_df_gcm %>% 
   select(all_of(c_cols)) %>% 
   mutate(c_prior = TruncatedNormal::rtnorm(nrow(draws_df_gcm), 0, 1, lb = 0)) %>% 
   pivot_longer(cols = starts_with("c["), names_to = "param", values_to = "value") %>%
@@ -686,10 +677,7 @@ draws_c_sim <- draws_df_gcm %>%
   select(-c) %>% 
   mutate(w_id = case_when(agent %in%seq(1,10) ~ "even", 
                           agent %in% seq(11,20) ~ "eyes_spots", 
-                          agent %in% seq(21,30) ~ "color_arms"))
-
-#plot prior-posterior update checks
-draws_c_sim %>% 
+                          agent %in% seq(21,30) ~ "color_arms")) %>% 
   ggplot()+
   geom_density(aes(x=value, group = agent), color = "grey")+
   geom_density(aes(x= c_prior, color = "red") )+
@@ -780,7 +768,7 @@ load("data/emp_data_fit.RData")
 ## Model Quality Checks (Empirical Data)
 ### Convergence Checks
 ```{r}
-cat("Convergence checks for GSM model on empirical data \n")
+cat("Convergence checks for GCM model on empirical data \n")
 gcm_rhat_issues <- emp_gcm_sum %>% 
   filter(rhat > 1.05) %>% 
   nrow()
@@ -788,25 +776,22 @@ cat("Empirical GCM model parameters with Rhat > 1.05:",
     gcm_rhat_issues, "out of", nrow(emp_gcm_sum), "\n")
 ```
 
-### Markov Chains - Traceplots
+### Markov Chains - Traceplots: Attention Weights and Sensitivity Parameter
 ```{r}
-# ATTENTION WEIGHTS 
 #reformat draws data frame to plot trace plots
 w_cols_emp <- grep("^w\\[", colnames(emp_draws_df_gcm), value = TRUE)
 
-draws_w_all_emp <- emp_draws_df_gcm %>%
+emp_draws_df_gcm %>%
   select(.iteration, .chain, all_of(w_cols_emp)) %>%
   pivot_longer(cols = starts_with("w["), names_to = "param", values_to = "value") %>%
   separate(param, into = c("w", "sub", "feature"), sep = "\\[|,|\\]", convert = TRUE) %>%
-  select(-w)
-
-#traceplots for 1:3 subs
-draws_w_all_emp %>% 
+  select(-w) %>% 
   filter(sub %in% seq(1,3)) %>% 
 ggplot(aes(x = .iteration, y = value,  color = .chain)) +
   geom_line(alpha = 0.6) +
   facet_grid(rows = vars(feature), cols = vars(sub), 
-              labeller = labeller(feature = c(`1` = "Eyes", `2` = "Legs", `3` = "Spots", `4` = "Arms", `5` = "Color")))+
+            labeller = labeller(
+                feature = c(`1` = "Eyes", `2` = "Legs", `3` = "Spots", `4` = "Arms", `5` = "Color")))+
   ggtitle("Traceplots: W per Feature and Subject")+
   theme_minimal()
 ggsave(filename = "figs/traceplots_w_emp.png", width = 10)
@@ -831,15 +816,12 @@ ggsave(filename = "figs/traceplots_c_emp.png", width = 10)
 ### Prior-Posterior Update Checks: Attention Weight (w)
 ```{r}
 #reformat data frame
-emp_w_draws <- emp_draws_df_gcm %>%
+emp_draws_df_gcm %>%
   select(all_of(w_cols_emp)) %>%
   mutate(w_prior = rdirichlet(nrow(emp_draws_df_gcm), c(1, 1, 1, 1, 1))[,1]) %>% 
   pivot_longer(cols = starts_with("w["), names_to = "param", values_to = "value") %>%
   separate(param, into = c("w", "sub", "feature"), sep = "\\[|,|\\]", convert = TRUE) %>%
-  select(-w) 
-
-#plot prior-posterior update checks
-emp_w_draws %>% 
+  select(-w) %>% 
   ggplot()+
   geom_density(aes(x=value, group = sub), color = "grey")+
   geom_density(aes(x= w_prior, color = "red") )+
@@ -857,15 +839,12 @@ ggsave("figs/prior_post_w_emp.png", width = 15)
 ### Prior-Posterior Update Checks: Sensitivity Parameter (c)
 ```{r}
 #reformat data frame
-emp_c_draws <- emp_draws_df_gcm %>%
+emp_draws_df_gcm %>%
   select(all_of(c_cols_emp)) %>%
   mutate(c_prior = TruncatedNormal::rtnorm(nrow(emp_draws_df_gcm), 0, 1, lb = 0)) %>% 
   pivot_longer(cols = starts_with("c["), names_to = "param", values_to = "value") %>%
   separate(param, into = c("c", "sub"), sep = "\\[|,|\\]", convert = TRUE) %>%
-  select(-c) 
-
-#plot prior-posterior update checks
-emp_c_draws %>% 
+  select(-c) %>% 
   ggplot()+
   geom_density(aes(x=value, group = sub), color = "grey")+
   geom_density(aes(x= c_prior, color = "red") )+
@@ -882,36 +861,33 @@ ggsave("figs/prior_post_c_emp.png", width = 10)
 ### Plot Results: Attention Weights
 ```{r}
 # Reformat Weights for results plots
-w_sum_emp <- emp_gcm_sum[emp_gcm_sum$variable %in% w_cols, ]
-
-w_sum_emp <- w_sum_emp %>% 
+ emp_gcm_sum %>% 
+  filter(variable %in% w_cols_emp) %>% 
   select(c("variable", "mean")) %>% 
-  separate(variable, into = c("w", "sub", "feature"), sep = "\\[|,|\\]", convert = TRUE)
-
-ggplot(w_sum_emp)+
+  separate(variable, into = c("w", "sub", "feature"), sep = "\\[|,|\\]", convert = TRUE) %>% 
+ggplot()+
   geom_point(aes(x = sub, y = mean))+
   ggtitle("Estimated Weights for each Subject")+
   ylab("attention weight")+
-  facet_grid(rows = vars(feature), 
-             labeller = labeller(feature = c(`1` = "Eyes", `2` = "Legs", `3` = "Spots", `4` = "Arms", `5` = "Color")))+
+  facet_grid(rows = vars(feature), labeller = labeller(
+    feature = c(`1` = "Eyes", `2` = "Legs", `3` = "Spots", `4` = "Arms", `5` = "Color")))+
   theme_minimal()
-ggsave(filename = "figs/emperical_w.png")
+ggsave(filename = "figs/emp_w.png")
 ```
 
 ### Plot Results: Sensitivity Parameter
 ```{r}
 # Reformat Weights for results plots
-c_sum_emp <- emp_gcm_sum[emp_gcm_sum$variable %in% c_cols, ]
-c_sum_emp <- c_sum_emp %>% 
+emp_gcm_sum %>% 
+  filter(variable %in% c_cols_emp) %>% 
   select(c("variable", "mean")) %>% 
-  separate(variable, into = c("c", "sub"), sep = "\\[|,|\\]", convert = TRUE)
-
-ggplot(c_sum_emp)+
+  separate(variable, into = c("c", "sub"), sep = "\\[|,|\\]", convert = TRUE) %>% 
+ggplot()+
   geom_point(aes(x = sub, y = mean))+
   ggtitle("Estimated Sensitivity Parameter for each Subject")+
   ylab("c")+
   theme_minimal()
-ggsave(filename = "figs/emperical_c.png")
+ggsave(filename = "figs/emp_c.png")
 ```
 
 
