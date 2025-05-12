@@ -12,7 +12,7 @@ knitr::opts_chunk$set(echo = TRUE)
 # Load Packages
 ```{r}
 pacman::p_load(tidyverse, here, posterior, cmdstanr, brms, tidybayes, rstan, 
-               ggplot2, dplyr, patchwork)
+               ggplot2, dplyr, patchwork, TruncatedNormal)
 ```
 
 # EMPIRICAL DATA
@@ -489,6 +489,17 @@ load("data/sim_data_fit.RData")
 
 
 ## Model Quality Checks (Simulated Data)
+
+### Convergence Checks
+```{r}
+cat("Convergence checks for GSM model on simulated data \n")
+gcm_rhat_issues <- gcm_sum %>% 
+  filter(rhat > 1.05) %>% 
+  nrow()
+cat("Empirical GCM model parameters with Rhat > 1.05:", 
+    gcm_rhat_issues, "out of", nrow(gcm_sum), "\n")
+```
+
 ### Markov Chains - Traceplots
 ```{r}
 # ATTENTION WEIGHTS 
@@ -534,8 +545,7 @@ draws_df_gcm %>%
 ggsave(filename = "figs/traceplots_average_c.png", width = 10)
 ```
 
-### Recovery
-
+### Recovery of True Values: Attention Weights
 ```{r}
 # Reformat Weights for 'recovery' plots
 w_summary <- gcm_sum[gcm_sum$variable %in% w_cols,]
@@ -558,25 +568,147 @@ ggplot(w_summary)+
   geom_point(aes(y = true_w, x = true_w), colour = "red")+
   lims(x = c(0,0.5), y = c(0,0.5))+
   labs(xlab("est_w"))+
+  ggtitle("Mean Estimated weight per Agent", subtitle = "Red dots indicate true w values")+
   facet_grid(cols = vars(w_id), rows = vars(feature), 
              labeller = labeller(feature = c(`1` = "Eyes", `2` = "Legs", `3` = "Spots", `4` = "Arms", `5` = "Color")))+
   theme_minimal()
 ggsave(filename = "figs/recov_w.png")
-
-
-
+```
+### Recovery of True Values: Sensitivity Parameter
+```{r}
+# Reformat Weights for results plots
+gcm_sum %>% 
+  filter(variable%in%c_cols) %>% 
+  select(c("variable", "mean")) %>% 
+  separate(variable, into = c("c", "agent"), sep = "\\[|,|\\]", convert = TRUE) %>% 
+  mutate(w_id = case_when(agent %in%seq(1,10) ~ "even", 
+                          agent %in% seq(11,20) ~ "eyes_spots", 
+                          agent %in% seq(21,30) ~ "color_arms")) %>% 
+  ggplot()+
+  geom_point(aes(x = agent, y = mean, color = w_id))+
+  geom_hline(yintercept = 1.5)+
+  annotate("text", x=25, y=1.52, label="true c")+
+  ggtitle("Estimated Sensitivity Parameter for each Agent")+
+  ylab("c")+
+  theme_minimal()
+ggsave(filename = "figs/recov_c.png")
 ```
 
 
+### Prior-Posterior Update Checks: Attention Weights
+```{r}
+# define cols from agent 1, 11 and 21
+w_cols_a1 <- grep("^w\\[1,\\d\\]$", colnames(draws_df_gcm), value = TRUE)
+w_cols_a11 <- grep("^w\\[11,\\d\\]$", colnames(draws_df_gcm), value = TRUE)
+w_cols_a21 <- grep("^w\\[21,\\d\\]$", colnames(draws_df_gcm), value = TRUE)
 
-### Prior-Posterior Update Checks
+# extract defined cols
+draws_w_sim <- draws_df_gcm %>% 
+  select(all_of(c(w_cols_a1, w_cols_a11, w_cols_a21))) %>% 
+  mutate(w_prior= rdirichlet(nrow(draws_df_gcm), c(1, 1, 1, 1, 1))[,1])
 
+# Plot agent 1
+p1 <- draws_w_sim %>% 
+  select(c(all_of(w_cols_a1), w_prior)) %>% 
+  ggplot()+
+  geom_density(aes(`w[1,1]`, color = "green4"), linewidth = 0.6)+
+  geom_density(aes(`w[1,2]`, color = "blue4"), linewidth = 0.6)+
+  geom_density(aes(`w[1,3]`, color = "orange3"), linewidth = 0.6)+
+  geom_density(aes(`w[1,4]`, color = "red3"), linewidth = 0.6)+
+  geom_density(aes(`w[1,5]`, color = "yellow3"), linewidth = 0.6)+
+  geom_density(aes(w_prior, color = "black"), fill = "grey", alpha = 0.5, linewidth = 0.1)+
+  geom_vline(xintercept = 0.2)+
+  annotate("text", x=0.25, y=3.3, label="true w")+
+  xlab("Attention Weight (w) for Agent 1")+
+  #ggtitle("Prior-Posterior Update Check: w for agent1")+
+  scale_color_identity(name = "Feature",
+                          breaks = c("green4", "blue4", "orange3", "red3", "yellow3", "black"),
+                          labels = c("eyes", "legs", "spots", "arms", "color", "prior"),
+                          guide = "legend")+
+  theme_minimal();p1
+ggsave("figs/prior_post_w_a1.png")
+
+
+# Plot agent 11
+p2 <- draws_w_sim %>% 
+  select(c(all_of(w_cols_a11), w_prior)) %>% 
+  ggplot()+
+  geom_density(aes(`w[11,1]`, color = "green4"), linewidth = 0.6)+
+  geom_density(aes(`w[11,2]`, color = "blue4"), linewidth = 0.6)+
+  geom_density(aes(`w[11,3]`, color = "orange3"), linewidth = 0.6)+
+  geom_density(aes(`w[11,4]`, color = "red3"), linewidth = 0.6)+
+  geom_density(aes(`w[11,5]`, color = "yellow3"), linewidth = 0.6)+
+  geom_density(aes(w_prior, color = "black"), fill = "grey", alpha = 0.5, linewidth = 0.1)+
+  geom_vline(xintercept = c(softmax(c(1.8, 1, 1.8, 1, 1))))+
+  annotate("text", x=0.42, y=2.5, label="true w: eyes & spots")+
+  annotate("text", x=0.21, y=3.3, label="true w: legs, \narms & color")+
+  xlab("Attention Weight (w) for Agent 11")+
+  ggtitle("Prior-Posterior Update Check: W")+
+  scale_color_identity(name = "Feature",
+                          breaks = c("green4", "blue4", "orange3", "red3", "yellow3", "black"),
+                          labels = c("eyes", "legs", "spots", "arms", "color", "prior"),
+                          guide = "legend")+
+  theme_minimal();p2
+ggsave("figs/prior_post_w_a11.png")
+
+# Plot agent 21
+p3 <- draws_w_sim %>% 
+  select(c(all_of(w_cols_a21), w_prior)) %>% 
+  ggplot()+
+  geom_density(aes(`w[21,1]`, color = "green4"), linewidth = 0.6)+
+  geom_density(aes(`w[21,2]`, color = "blue4"), linewidth = 0.6)+
+  geom_density(aes(`w[21,3]`, color = "orange3"), linewidth = 0.6)+
+  geom_density(aes(`w[21,4]`, color = "red3"), linewidth = 0.6)+
+  geom_density(aes(`w[21,5]`, color = "yellow3"), linewidth = 0.6)+
+  geom_density(aes(w_prior, color = "black"), fill = "grey", alpha = 0.5, linewidth = 0.1)+
+  geom_vline(xintercept = softmax(c(1, 1, 1, 1.8, 1.8)))+
+  annotate("text", x=0.40, y=2.5, label="true w: eyes,\nlegs & spots")+
+  annotate("text", x=0.22, y=4, label="true w: color \n& arms")+
+  xlab("Attention Weight (w) for Agent 21")+
+ # ggtitle("Prior-Posterior Update Check: w for agent 21")+
+  scale_color_identity(name = "Feature",
+                          breaks = c("green4", "blue4", "orange3", "red3", "yellow3", "black"),
+                          labels = c("eyes", "legs", "spots", "arms", "color", "prior"),
+                          guide = "legend")+
+  theme_minimal();p3
+ggsave("figs/prior_post_w_a21.png")
+
+```
+
+### Prior-Posterior Update Checks: Sensitivity Parameter (c)
+```{r}
+#reformat data
+draws_c_sim <- draws_df_gcm %>% 
+  select(all_of(c_cols)) %>% 
+  mutate(c_prior = TruncatedNormal::rtnorm(nrow(draws_df_gcm), 0, 1, lb = 0)) %>% 
+  pivot_longer(cols = starts_with("c["), names_to = "param", values_to = "value") %>%
+  separate(param, into = c("c", "agent"), sep = "\\[|,|\\]", convert = TRUE) %>%
+  select(-c) %>% 
+  mutate(w_id = case_when(agent %in%seq(1,10) ~ "even", 
+                          agent %in% seq(11,20) ~ "eyes_spots", 
+                          agent %in% seq(21,30) ~ "color_arms"))
+
+#plot prior-posterior update checks
+draws_c_sim %>% 
+  ggplot()+
+  geom_density(aes(x=value, group = agent), color = "grey")+
+  geom_density(aes(x= c_prior, color = "red") )+
+  theme_minimal()+
+  geom_vline(xintercept = 1.5)+
+  annotate("text", x=2, y=1, label="true c")+
+  facet_grid(cols = vars(w_id))+
+  ggtitle("Prior-Posterior Update Check: C (simulated data)")+
+  scale_color_identity(name = "",
+                       breaks = c("red"),
+                       labels = c("prior"),
+                       guide = "legend")
+ggsave("figs/prior_post_c_sim.png", width = 10)
+```
 
 # FIT & CHECK STAN ON EMPIRICAL DATA
 
 ## Fit the STAN Model (Empirical Data)
 ```{r}
-
 # unique stimuli from empirical data
 emp_stim_df <- unique(emp_data[c("dangerous", "eyes", "legs", "spots", "arms", "color")])
 emp_stim_df$id <- seq(1:nrow(emp_stim_df))
@@ -648,7 +780,6 @@ load("data/emp_data_fit.RData")
 ## Model Quality Checks (Empirical Data)
 ### Convergence Checks
 ```{r}
-
 cat("Convergence checks for GSM model on empirical data \n")
 gcm_rhat_issues <- emp_gcm_sum %>% 
   filter(rhat > 1.05) %>% 
@@ -657,16 +788,130 @@ cat("Empirical GCM model parameters with Rhat > 1.05:",
     gcm_rhat_issues, "out of", nrow(emp_gcm_sum), "\n")
 ```
 
-### Markov Chains
-
-
+### Markov Chains - Traceplots
 ```{r}
-ggplot(draws_df_simple, aes(.iteration, alpha_prior, group = .chain, color = .chain)) +
-  geom_line() +
-  ggtitle("Simple Model: Alpha Prior")+
-  theme_classic()
-ggsave("figs/markov_chains_simple_alpha_prior.png")
+# ATTENTION WEIGHTS 
+#reformat draws data frame to plot trace plots
+w_cols_emp <- grep("^w\\[", colnames(emp_draws_df_gcm), value = TRUE)
+
+draws_w_all_emp <- emp_draws_df_gcm %>%
+  select(.iteration, .chain, all_of(w_cols_emp)) %>%
+  pivot_longer(cols = starts_with("w["), names_to = "param", values_to = "value") %>%
+  separate(param, into = c("w", "sub", "feature"), sep = "\\[|,|\\]", convert = TRUE) %>%
+  select(-w)
+
+#traceplots for 1:3 subs
+draws_w_all_emp %>% 
+  filter(sub %in% seq(1,3)) %>% 
+ggplot(aes(x = .iteration, y = value,  color = .chain)) +
+  geom_line(alpha = 0.6) +
+  facet_grid(rows = vars(feature), cols = vars(sub), 
+              labeller = labeller(feature = c(`1` = "Eyes", `2` = "Legs", `3` = "Spots", `4` = "Arms", `5` = "Color")))+
+  ggtitle("Traceplots: W per Feature and Subject")+
+  theme_minimal()
+ggsave(filename = "figs/traceplots_w_emp.png", width = 10)
+
+# SENSITIVITY PARAMETER (c)
+c_cols_emp <- grep("^c\\[", colnames(emp_draws_df_gcm), value = TRUE)
+
+emp_draws_df_gcm %>% 
+  select(.iteration, .chain, all_of(c_cols_emp)) %>% 
+  pivot_longer(cols = starts_with("c["), names_to = "param", values_to = "value") %>% 
+  separate(param, into = c("c", "sub", "feature"), sep = "\\[|,|\\]", convert = TRUE) %>%
+  filter(sub %in% seq(1,3)) %>% 
+  ggplot(aes(.iteration, value, group = .chain, color = .chain)) +
+  geom_line(alpha = 0.5) +
+  facet_grid(cols = vars(sub))+
+  ggtitle("Traceplot: C per Feature and Subject")+
+  theme_minimal()
+ggsave(filename = "figs/traceplots_c_emp.png", width = 10)
 ```
 
+
+### Prior-Posterior Update Checks: Attention Weight (w)
+```{r}
+#reformat data frame
+emp_w_draws <- emp_draws_df_gcm %>%
+  select(all_of(w_cols_emp)) %>%
+  mutate(w_prior = rdirichlet(nrow(emp_draws_df_gcm), c(1, 1, 1, 1, 1))[,1]) %>% 
+  pivot_longer(cols = starts_with("w["), names_to = "param", values_to = "value") %>%
+  separate(param, into = c("w", "sub", "feature"), sep = "\\[|,|\\]", convert = TRUE) %>%
+  select(-w) 
+
+#plot prior-posterior update checks
+emp_w_draws %>% 
+  ggplot()+
+  geom_density(aes(x=value, group = sub), color = "grey")+
+  geom_density(aes(x= w_prior, color = "red") )+
+  facet_grid(cols = vars(feature),  labeller = labeller(
+    feature = c(`1` = "Eyes", `2` = "Legs", `3` = "Spots", `4` = "Arms", `5` = "Color")))+
+  theme_minimal()+
+  ggtitle("Prior-Posterior Update Check: W (emperical data)")+
+  scale_color_identity(name = "",
+                          breaks = c("red"),
+                          labels = c("prior"),
+                          guide = "legend")
+ggsave("figs/prior_post_w_emp.png", width = 15)
+```
+
+### Prior-Posterior Update Checks: Sensitivity Parameter (c)
+```{r}
+#reformat data frame
+emp_c_draws <- emp_draws_df_gcm %>%
+  select(all_of(c_cols_emp)) %>%
+  mutate(c_prior = TruncatedNormal::rtnorm(nrow(emp_draws_df_gcm), 0, 1, lb = 0)) %>% 
+  pivot_longer(cols = starts_with("c["), names_to = "param", values_to = "value") %>%
+  separate(param, into = c("c", "sub"), sep = "\\[|,|\\]", convert = TRUE) %>%
+  select(-c) 
+
+#plot prior-posterior update checks
+emp_c_draws %>% 
+  ggplot()+
+  geom_density(aes(x=value, group = sub), color = "grey")+
+  geom_density(aes(x= c_prior, color = "red") )+
+  theme_minimal()+
+  ggtitle("Prior-Posterior Update Check: C (emperical data)")+
+  scale_color_identity(name = "",
+                          breaks = c("red"),
+                          labels = c("prior"),
+                          guide = "legend")
+ggsave("figs/prior_post_c_emp.png", width = 10)
+```
+
+
+### Plot Results: Attention Weights
+```{r}
+# Reformat Weights for results plots
+w_sum_emp <- emp_gcm_sum[emp_gcm_sum$variable %in% w_cols, ]
+
+w_sum_emp <- w_sum_emp %>% 
+  select(c("variable", "mean")) %>% 
+  separate(variable, into = c("w", "sub", "feature"), sep = "\\[|,|\\]", convert = TRUE)
+
+ggplot(w_sum_emp)+
+  geom_point(aes(x = sub, y = mean))+
+  ggtitle("Estimated Weights for each Subject")+
+  ylab("attention weight")+
+  facet_grid(rows = vars(feature), 
+             labeller = labeller(feature = c(`1` = "Eyes", `2` = "Legs", `3` = "Spots", `4` = "Arms", `5` = "Color")))+
+  theme_minimal()
+ggsave(filename = "figs/emperical_w.png")
+```
+
+### Plot Results: Sensitivity Parameter
+```{r}
+# Reformat Weights for results plots
+c_sum_emp <- emp_gcm_sum[emp_gcm_sum$variable %in% c_cols, ]
+c_sum_emp <- c_sum_emp %>% 
+  select(c("variable", "mean")) %>% 
+  separate(variable, into = c("c", "sub"), sep = "\\[|,|\\]", convert = TRUE)
+
+ggplot(c_sum_emp)+
+  geom_point(aes(x = sub, y = mean))+
+  ggtitle("Estimated Sensitivity Parameter for each Subject")+
+  ylab("c")+
+  theme_minimal()
+ggsave(filename = "figs/emperical_c.png")
+```
 
 
