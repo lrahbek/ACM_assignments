@@ -24,7 +24,9 @@ The project structure is as follows:
     ├── README.md
     └── assignment2.R           # The main markdown for assignment 2
 ├── assignment3/
+    ├── data/
     ├── figs/
+    ├── stan/
     ├── README.md
     └── assignment3.R           # The main markdown for assignment 3
 ├── assignment4/
@@ -32,7 +34,7 @@ The project structure is as follows:
     ├── figs/
     ├── stan/
     ├── README.md
-    └── assignment3.R           # The main markdown for assignment 3
+    └── assignment4.R           # The main markdown for assignment 4
 ├── .gitignore
 └── README.md
 
