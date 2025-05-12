@@ -489,9 +489,87 @@ load("data/sim_data_fit.RData")
 
 
 ## Model Quality Checks (Simulated Data)
+### Markov Chains - Traceplots
 ```{r}
+# ATTENTION WEIGHTS 
+#reformat draws data frame to plot trace plots
+w_cols <- grep("^w\\[", colnames(draws_df_gcm), value = TRUE)
+
+draws_w_all <- draws_df_gcm %>%
+  select(.iteration, .chain, all_of(w_cols)) %>%
+  pivot_longer(cols = starts_with("w["), names_to = "param", values_to = "value") %>%
+  separate(param, into = c("w", "agent", "feature"), sep = "\\[|,|\\]", convert = TRUE) %>%
+  select(-w)
+draws_w_all$w_id <- ifelse(draws_w_all$agent %in% seq(1, 10), "even",
+                            ifelse(draws_w_all$agent %in% seq(11, 20), "eyes_spots", 
+                            ifelse(draws_w_all$agent %in% seq(21, 30), "color_arms", NA)))
+draws_w_all$w_id <- as.factor(draws_w_all$w_id)
+
+#Average over agents for each iteration/feature
+avg_trace <- draws_w_all %>%
+  group_by(.iteration, .chain, w_id, feature) %>%
+  summarise(mean_value = mean(value), .groups = "drop")
+
+#Plot traceplots of average attention per feature
+ggplot(avg_trace, aes(x = .iteration, y = mean_value,  color = .chain)) +
+  geom_line(alpha = 0.6) +
+  facet_grid(rows = vars(feature), cols = vars(w_id), 
+              labeller = labeller(feature = c(`1` = "Eyes", `2` = "Legs", `3` = "Spots", `4` = "Arms", `5` = "Color")))+
+  ggtitle("Traceplots: Average W per Feature and Weight-ID")+
+  theme_minimal()
+ggsave(filename = "figs/traceplots_average_w.png", width = 10)
+
+# SENSITIVITY PARAMETER (c)
+c_cols <- grep("^c\\[", colnames(draws_df_gcm), value = TRUE)
+
+draws_df_gcm %>% 
+  select(.iteration, .chain, all_of(c_cols)) %>% 
+  pivot_longer(cols = starts_with("c["), names_to = "param", values_to = "value") %>% 
+  group_by(.iteration, .chain) %>%
+  summarise(mean_value = mean(value), .groups = "drop") %>% 
+  ggplot(aes(.iteration, mean_value, group = .chain, color = .chain)) +
+  geom_line(alpha = 0.5) +
+  ggtitle("Traceplot: Average Sentivity Parameter (c)")+
+  theme_minimal()
+ggsave(filename = "figs/traceplots_average_c.png", width = 10)
+```
+
+### Recovery
+
+```{r}
+# Reformat Weights for 'recovery' plots
+w_summary <- gcm_sum[gcm_sum$variable %in% w_cols,]
+w_summary <- w_summary %>% 
+  select(c("variable", "mean")) %>% 
+  separate(variable, into = c("w", "agent", "feature"), sep = "\\[|,|\\]", convert = TRUE)
+w_summary$w_id <- ifelse(w_summary$agent %in% seq(1, 10), "even",
+                            ifelse(w_summary$agent %in% seq(11, 20), "eyes_spots", 
+                            ifelse(w_summary$agent %in% seq(21, 30), "color_arms", NA)))
+w_summary$w_id <- as.factor(w_summary$w_id)
+
+true_w_df <- data.frame(w_id = c(rep("even", 5), rep("eyes_spots", 5), rep("color_arms", 5)),
+                        feature = rep(seq(1,5), 3),
+                        true_w = c(rep(0.2, 5), softmax(c(1.8, 1, 1.8, 1, 1)), softmax(c(1, 1, 1, 1.8, 1.8))))
+
+w_summary <- left_join(w_summary, true_w_df, by = c("w_id", "feature"))
+
+ggplot(w_summary)+
+  geom_point(aes(x = true_w, y = mean))+
+  geom_point(aes(y = true_w, x = true_w), colour = "red")+
+  lims(x = c(0,0.5), y = c(0,0.5))+
+  labs(xlab("est_w"))+
+  facet_grid(cols = vars(w_id), rows = vars(feature), 
+             labeller = labeller(feature = c(`1` = "Eyes", `2` = "Legs", `3` = "Spots", `4` = "Arms", `5` = "Color")))+
+  theme_minimal()
+ggsave(filename = "figs/recov_w.png")
+
+
 
 ```
+
+
+
+### Prior-Posterior Update Checks
 
 
 # FIT & CHECK STAN ON EMPIRICAL DATA
