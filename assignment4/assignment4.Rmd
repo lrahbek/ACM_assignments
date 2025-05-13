@@ -568,9 +568,9 @@ ggsave(filename = "figs/recov_w.png")
 ```
 ### Recovery of True Values: Sensitivity Parameter
 ```{r}
-# Reformat Weights for results plots
-gcm_sum %>% 
-  filter(variable%in%c_cols) %>% 
+# Reformat Weights for results plots 
+sim_gcm_sum %>% 
+  filter(variable%in%c_cols_sim) %>% 
   select(c("variable", "mean")) %>% 
   separate(variable, into = c("c", "agent"), sep = "\\[|,|\\]", convert = TRUE) %>% 
   mutate(w_id = case_when(agent %in%seq(1,10) ~ "even", 
@@ -578,45 +578,50 @@ gcm_sum %>%
                           agent %in% seq(21,30) ~ "color_arms")) %>% 
   ggplot()+
   geom_point(aes(x = agent, y = mean, color = w_id))+
+  scale_color_viridis_d()+
   geom_hline(yintercept = 1.5)+
-  annotate("text", x=25, y=1.52, label="true c")+
+  annotate("text", x=2, y=1.52, label="true c = 1.5")+
   ggtitle("Estimated Sensitivity Parameter for each Agent")+
   ylab("c")+
-  theme_minimal()
-ggsave(filename = "figs/recov_c.png")
+  theme_minimal()+
+  theme(legend.position = c(0.85,0.78))
+ggsave(filename = "figs/recov_c.png", height = 4, width = 8)
 ```
 
 
 ### Prior-Posterior Update Checks: Attention Weights
 ```{r}
 # define cols from agent 1, 11 and 21
-w_cols_a1 <- grep("^w\\[1,\\d\\]$", colnames(draws_df_gcm), value = TRUE)
-w_cols_a11 <- grep("^w\\[11,\\d\\]$", colnames(draws_df_gcm), value = TRUE)
-w_cols_a21 <- grep("^w\\[21,\\d\\]$", colnames(draws_df_gcm), value = TRUE)
+w_cols_a1 <- grep("^w\\[1,\\d\\]$", colnames(sim_draws_df_gcm), value = TRUE)
+w_cols_a11 <- grep("^w\\[11,\\d\\]$", colnames(sim_draws_df_gcm), value = TRUE)
+w_cols_a21 <- grep("^w\\[21,\\d\\]$", colnames(sim_draws_df_gcm), value = TRUE)
+colors <- viridis::viridis(5)
+
 
 # extract defined cols
-draws_w_sim <- draws_df_gcm %>% 
+draws_w_sim <- sim_draws_df_gcm %>% 
   select(all_of(c(w_cols_a1, w_cols_a11, w_cols_a21))) %>% 
-  mutate(w_prior= rdirichlet(nrow(draws_df_gcm), c(1, 1, 1, 1, 1))[,1])
+  mutate(w_prior= rdirichlet(nrow(sim_draws_df_gcm), c(1, 1, 1, 1, 1))[,1])
 
 # Plot agent 1
 p1 <- draws_w_sim %>% 
   select(c(all_of(w_cols_a1), w_prior)) %>% 
   ggplot()+
-  geom_density(aes(`w[1,1]`, color = "green4"), linewidth = 0.6)+
-  geom_density(aes(`w[1,2]`, color = "blue4"), linewidth = 0.6)+
-  geom_density(aes(`w[1,3]`, color = "orange3"), linewidth = 0.6)+
-  geom_density(aes(`w[1,4]`, color = "red3"), linewidth = 0.6)+
-  geom_density(aes(`w[1,5]`, color = "yellow3"), linewidth = 0.6)+
+  geom_density(aes(`w[1,1]`, color = colors[1]), linewidth = 0.6)+
+  geom_density(aes(`w[1,2]`, color = colors[2]), linewidth = 0.6)+
+  geom_density(aes(`w[1,3]`, color = colors[3]), linewidth = 0.6)+
+  geom_density(aes(`w[1,4]`, color = colors[4]), linewidth = 0.6)+
+  geom_density(aes(`w[1,5]`, color = colors[5]), linewidth = 0.6)+
   geom_density(aes(w_prior, color = "black"), fill = "grey", alpha = 0.5, linewidth = 0.1)+
   geom_vline(xintercept = 0.2)+
   annotate("text", x=0.25, y=3.3, label="true w")+
   xlab("Attention Weight (w) for Agent 1")+
   #ggtitle("Prior-Posterior Update Check: w for agent1")+
   scale_color_identity(name = "Feature",
-                          breaks = c("green4", "blue4", "orange3", "red3", "yellow3", "black"),
+                          breaks = c(colors, "black"),
                           labels = c("eyes", "legs", "spots", "arms", "color", "prior"),
-                          guide = "legend")+
+                       #   guide = "legend"
+                       )+
   theme_minimal();p1
 ggsave("figs/prior_post_w_a1.png")
 
@@ -625,21 +630,22 @@ ggsave("figs/prior_post_w_a1.png")
 p2 <- draws_w_sim %>% 
   select(c(all_of(w_cols_a11), w_prior)) %>% 
   ggplot()+
-  geom_density(aes(`w[11,1]`, color = "green4"), linewidth = 0.6)+
-  geom_density(aes(`w[11,2]`, color = "blue4"), linewidth = 0.6)+
-  geom_density(aes(`w[11,3]`, color = "orange3"), linewidth = 0.6)+
-  geom_density(aes(`w[11,4]`, color = "red3"), linewidth = 0.6)+
-  geom_density(aes(`w[11,5]`, color = "yellow3"), linewidth = 0.6)+
+  geom_density(aes(`w[11,1]`, color = colors[1]), linewidth = 0.6)+
+  geom_density(aes(`w[11,2]`, color = colors[2]), linewidth = 0.6)+
+  geom_density(aes(`w[11,3]`, color = colors[3]), linewidth = 0.6)+
+  geom_density(aes(`w[11,4]`, color = colors[4]), linewidth = 0.6)+
+  geom_density(aes(`w[11,5]`, color = colors[5]), linewidth = 0.6)+
   geom_density(aes(w_prior, color = "black"), fill = "grey", alpha = 0.5, linewidth = 0.1)+
   geom_vline(xintercept = c(softmax(c(1.8, 1, 1.8, 1, 1))))+
   annotate("text", x=0.42, y=2.5, label="true w: eyes & spots")+
   annotate("text", x=0.21, y=3.3, label="true w: legs, \narms & color")+
   xlab("Attention Weight (w) for Agent 11")+
+  ylab("")+
+  ylim(c(0,6))+
   ggtitle("Prior-Posterior Update Check: W")+
   scale_color_identity(name = "Feature",
-                          breaks = c("green4", "blue4", "orange3", "red3", "yellow3", "black"),
-                          labels = c("eyes", "legs", "spots", "arms", "color", "prior"),
-                          guide = "legend")+
+                          breaks = c(colors, "black"),
+                          labels = c("eyes", "legs", "spots", "arms", "color", "prior"))+
   theme_minimal();p2
 ggsave("figs/prior_post_w_a11.png")
 
@@ -647,24 +653,27 @@ ggsave("figs/prior_post_w_a11.png")
 p3 <- draws_w_sim %>% 
   select(c(all_of(w_cols_a21), w_prior)) %>% 
   ggplot()+
-  geom_density(aes(`w[21,1]`, color = "green4"), linewidth = 0.6)+
-  geom_density(aes(`w[21,2]`, color = "blue4"), linewidth = 0.6)+
-  geom_density(aes(`w[21,3]`, color = "orange3"), linewidth = 0.6)+
-  geom_density(aes(`w[21,4]`, color = "red3"), linewidth = 0.6)+
-  geom_density(aes(`w[21,5]`, color = "yellow3"), linewidth = 0.6)+
+  geom_density(aes(`w[21,1]`, color = colors[1]), linewidth = 0.6)+
+  geom_density(aes(`w[21,2]`, color = colors[2]), linewidth = 0.6)+
+  geom_density(aes(`w[21,3]`, color = colors[3]), linewidth = 0.6)+
+  geom_density(aes(`w[21,4]`, color = colors[4]), linewidth = 0.6)+
+  geom_density(aes(`w[21,5]`, color = colors[5]), linewidth = 0.6)+
   geom_density(aes(w_prior, color = "black"), fill = "grey", alpha = 0.5, linewidth = 0.1)+
   geom_vline(xintercept = softmax(c(1, 1, 1, 1.8, 1.8)))+
   annotate("text", x=0.40, y=2.5, label="true w: eyes,\nlegs & spots")+
   annotate("text", x=0.22, y=4, label="true w: color \n& arms")+
   xlab("Attention Weight (w) for Agent 21")+
- # ggtitle("Prior-Posterior Update Check: w for agent 21")+
+  ylab("")+
+  ylim(c(0,6))+
   scale_color_identity(name = "Feature",
-                          breaks = c("green4", "blue4", "orange3", "red3", "yellow3", "black"),
+                          breaks = c(colors, "black"),
                           labels = c("eyes", "legs", "spots", "arms", "color", "prior"),
                           guide = "legend")+
   theme_minimal();p3
 ggsave("figs/prior_post_w_a21.png")
 
+p1+p2+p3
+ggsave("figs/prior_post_w.png", width = 14)
 ```
 
 ### Prior-Posterior Update Checks: Sensitivity Parameter (c)
@@ -872,7 +881,7 @@ ggplot()+
   facet_grid(rows = vars(feature), labeller = labeller(
     feature = c(`1` = "Eyes", `2` = "Legs", `3` = "Spots", `4` = "Arms", `5` = "Color")))+
   theme_minimal()
-ggsave(filename = "figs/emp_w.png")
+ggsave(filename = "figs/emp_w.png", height = 9)
 ```
 
 ### Plot Results: Sensitivity Parameter
@@ -887,7 +896,7 @@ ggplot()+
   ggtitle("Estimated Sensitivity Parameter for each Subject")+
   ylab("c")+
   theme_minimal()
-ggsave(filename = "figs/emp_c.png")
+ggsave(filename = "figs/emp_c.png", height = 9, width = 5)
 ```
 
 
