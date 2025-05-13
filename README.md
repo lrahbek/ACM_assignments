@@ -24,7 +24,7 @@ The project structure is as follows:
     ├── README.md
     └── assignment2.R           # The main markdown for assignment 2
 ├── assignment3/
-    ├── data/
+    ├── data/                   # Place-holder
     ├── figs/
     ├── stan/
     ├── README.md
